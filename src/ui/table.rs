@@ -41,11 +41,7 @@ pub fn draw_table<'a>(
     }
 
     let interactive = state.is_some();
-    let selection_width = if interactive {
-        SELECTION_WIDTH
-    } else {
-        0
-    };
+    let selection_width = if interactive { SELECTION_WIDTH } else { 0 };
     let columns = column_areas(inner, widths, selection_width);
     let column_widths: Vec<u16> = columns.iter().map(|column| column.width).collect();
 
@@ -238,4 +234,3 @@ fn highlight_style() -> Style {
         .bg(Color::LightGreen)
         .add_modifier(Modifier::BOLD)
 }
-

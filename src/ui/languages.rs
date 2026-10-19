@@ -100,16 +100,7 @@ impl LanguageSummary {
         let centered = [false; 9];
 
         draw_table(
-            frame,
-            area,
-            block,
-            &header,
-            table_rows,
-            &widths,
-            &centered,
-            true,
-            false,
-            None,
+            frame, area, block, &header, table_rows, &widths, &centered, true, false, None,
         );
     }
 }

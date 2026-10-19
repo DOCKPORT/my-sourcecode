@@ -28,5 +28,3 @@ pub fn commas(value: usize) -> String {
 
     output
 }
-
-
