@@ -1,6 +1,6 @@
 use crate::scan::{FileRow, LanguageRow};
 use crate::ui::format::{average, commas};
-use crate::ui::table::draw_table;
+use crate::ui::table::{TableSpec, draw_table};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Rect};
 use ratatui::widgets::{Block, Borders};
@@ -62,13 +62,15 @@ impl Summary {
         draw_table(
             frame,
             area,
-            block,
-            &header,
-            vec![row],
-            &widths,
-            &centered,
-            false,
-            true,
+            TableSpec {
+                block,
+                header,
+                rows: vec![row],
+                widths: widths.to_vec(),
+                left_aligned: centered.to_vec(),
+                row_rules: false,
+                body_dividers: true,
+            },
             None,
         );
     }

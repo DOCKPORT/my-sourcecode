@@ -211,9 +211,10 @@ fn expand_tilde(raw: &str) -> PathBuf {
             return PathBuf::from(home);
         }
     } else if let Some(rest) = raw.strip_prefix("~/")
-        && let Some(home) = std::env::var_os("HOME") {
-            return PathBuf::from(home).join(rest);
-        }
+        && let Some(home) = std::env::var_os("HOME")
+    {
+        return PathBuf::from(home).join(rest);
+    }
 
     PathBuf::from(raw)
 }

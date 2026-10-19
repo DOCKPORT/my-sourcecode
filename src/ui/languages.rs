@@ -1,6 +1,6 @@
 use crate::scan::LanguageRow;
 use crate::ui::format::{average, commas};
-use crate::ui::table::draw_table;
+use crate::ui::table::{TableSpec, draw_table};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Rect};
 use ratatui::text::Text;
@@ -109,7 +109,18 @@ impl LanguageSummary {
         let centered = [false; 9];
 
         draw_table(
-            frame, area, block, &header, table_rows, &widths, &centered, true, false, None,
+            frame,
+            area,
+            TableSpec {
+                block,
+                header,
+                rows: table_rows,
+                widths: widths.to_vec(),
+                left_aligned: centered.to_vec(),
+                row_rules: true,
+                body_dividers: false,
+            },
+            None,
         );
     }
 }
@@ -146,8 +157,7 @@ fn compute_shares(rows: &[LanguageRow], total_bytes: usize) -> Vec<u16> {
         let mut largest = 0usize;
         for (index, row) in rows.iter().enumerate() {
             if row.bytes > rows[largest].bytes
-                || (row.bytes == rows[largest].bytes
-                    && row.language < rows[largest].language)
+                || (row.bytes == rows[largest].bytes && row.language < rows[largest].language)
             {
                 largest = index;
             }

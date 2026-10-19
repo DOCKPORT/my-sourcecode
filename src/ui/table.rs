@@ -13,6 +13,17 @@ const DIVIDER: &str = "│";
 /// Width of the `> ` selection marker.
 const SELECTION_WIDTH: u16 = 2;
 
+/// The content and options for one table.
+pub struct TableSpec<'a> {
+    pub block: Block<'a>,
+    pub header: Vec<String>,
+    pub rows: Vec<Vec<String>>,
+    pub widths: Vec<Constraint>,
+    pub left_aligned: Vec<bool>,
+    pub row_rules: bool,
+    pub body_dividers: bool,
+}
+
 /// Draw a table in three parts: the header, a subtle rule, and the body.
 ///
 /// The helper computes the column widths once. It uses them for text padding,
@@ -24,15 +35,19 @@ const SELECTION_WIDTH: u16 = 2;
 pub fn draw_table<'a>(
     frame: &mut Frame<'_>,
     area: Rect,
-    block: Block<'a>,
-    header: &[String],
-    rows: Vec<Vec<String>>,
-    widths: &[Constraint],
-    left_aligned: &[bool],
-    row_rules: bool,
-    body_dividers: bool,
+    spec: TableSpec<'a>,
     state: Option<&mut TableState>,
 ) {
+    let TableSpec {
+        block,
+        header,
+        rows,
+        widths,
+        left_aligned,
+        row_rules,
+        body_dividers,
+    } = spec;
+
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -42,7 +57,7 @@ pub fn draw_table<'a>(
 
     let interactive = state.is_some();
     let selection_width = if interactive { SELECTION_WIDTH } else { 0 };
-    let columns = column_areas(inner, widths, selection_width);
+    let columns = column_areas(inner, &widths, selection_width);
     let column_widths: Vec<u16> = columns.iter().map(|column| column.width).collect();
 
     let header_cells: Vec<Cell> = header
@@ -61,7 +76,7 @@ pub fn draw_table<'a>(
         width: inner.width,
         height: 1,
     };
-    let mut header_table = Table::new(Vec::<Row<'a>>::new(), widths.to_vec())
+    let mut header_table = Table::new(Vec::<Row<'a>>::new(), widths.clone())
         .header(header_row)
         .column_spacing(COLUMN_SPACING);
     if interactive {
@@ -110,7 +125,7 @@ pub fn draw_table<'a>(
                 Row::new(cells)
             })
             .collect();
-        let table = Table::new(body_rows, widths.to_vec()).column_spacing(COLUMN_SPACING);
+        let table = Table::new(body_rows, widths.clone()).column_spacing(COLUMN_SPACING);
 
         let draw_rules = row_rules && state.is_none();
         match state {

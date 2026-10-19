@@ -2,7 +2,7 @@ use crate::scan::FileRow;
 use crate::ui::Action;
 use crate::ui::bindings::Command;
 use crate::ui::format::commas;
-use crate::ui::table::draw_table;
+use crate::ui::table::{TableSpec, draw_table};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Rect};
 use ratatui::text::Text;
@@ -306,13 +306,15 @@ impl FileTable {
         draw_table(
             frame,
             area,
-            block,
-            &header,
-            rows,
-            &widths,
-            &left_aligned,
-            false,
-            true,
+            TableSpec {
+                block,
+                header,
+                rows,
+                widths: widths.to_vec(),
+                left_aligned: left_aligned.to_vec(),
+                row_rules: false,
+                body_dividers: true,
+            },
             Some(&mut self.state),
         );
     }
