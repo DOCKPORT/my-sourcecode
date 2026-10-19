@@ -320,7 +320,7 @@ impl FileTable {
 
 fn header_label(column: SortColumn, active: SortColumn, ascending: bool) -> String {
     if column == active {
-        let marker = if ascending { " ^" } else { " v" };
+        let marker = if ascending { " ▲" } else { " ▼" };
         format!("{}{marker}", column.label())
     } else {
         column.label().to_string()

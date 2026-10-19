@@ -1,5 +1,5 @@
 use crate::scan::LanguageRow;
-use crate::ui::format::{average, commas, percent};
+use crate::ui::format::{average, commas};
 use crate::ui::table::draw_table;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Rect};
@@ -9,15 +9,16 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 /// The read-only language summary shown above the file table.
 pub struct LanguageSummary {
     rows: Vec<LanguageRow>,
-    /// Total bytes of all counted files, used for the share column.
-    total_bytes: usize,
+    /// Share per language in tenths of a percent. The values sum to 1000.
+    shares: Vec<u16>,
 }
 
 impl LanguageSummary {
     /// Build the summary from the scan rows.
     pub fn new(rows: Vec<LanguageRow>) -> Self {
         let total_bytes = rows.iter().map(|row| row.bytes).sum();
-        Self { rows, total_bytes }
+        let shares = compute_shares(&rows, total_bytes);
+        Self { rows, shares }
     }
 
     /// Number of languages in the summary.
@@ -42,7 +43,15 @@ impl LanguageSummary {
         }
 
         let header = [
-            "language", "files", "lines", "code", "comments", "blanks", "bytes", "share", "avg",
+            "language",
+            "files",
+            "lines",
+            "code",
+            "comments",
+            "blanks",
+            "bytes",
+            "share",
+            "avg lines/file",
         ]
         .map(str::to_string)
         .to_vec();
@@ -71,7 +80,7 @@ impl LanguageSummary {
                 commas(row.comments),
                 commas(row.blanks),
                 commas(row.bytes),
-                percent(row.bytes, self.total_bytes),
+                share_label(self.shares.get(index).copied().unwrap_or(0)),
                 average(row.lines, row.files),
             ]);
         }
@@ -94,7 +103,7 @@ impl LanguageSummary {
             Constraint::Length(8),
             Constraint::Length(10),
             Constraint::Length(7),
-            Constraint::Length(7),
+            Constraint::Length(15),
         ];
 
         let centered = [false; 9];
@@ -108,4 +117,48 @@ impl LanguageSummary {
 /// A blank separator row with one cell per language column.
 fn blank_row() -> Vec<String> {
     (0..9).map(|_| String::new()).collect()
+}
+
+/// Compute each share in tenths of a percent.
+///
+/// Each share rounds to the nearest tenth. The largest language then absorbs the
+/// difference from 1000 tenths, so the visible values always sum to 100.0%.
+fn compute_shares(rows: &[LanguageRow], total_bytes: usize) -> Vec<u16> {
+    if rows.is_empty() {
+        return Vec::new();
+    }
+    if total_bytes == 0 {
+        return vec![0; rows.len()];
+    }
+
+    let total = total_bytes as u128;
+    let half = total / 2;
+    let mut tenths: Vec<u16> = Vec::with_capacity(rows.len());
+
+    for row in rows {
+        let scaled = row.bytes as u128 * 1000;
+        tenths.push(((scaled + half) / total) as u16);
+    }
+
+    let assigned: u32 = tenths.iter().map(|value| *value as u32).sum();
+    let drift = 1000i32 - assigned as i32;
+    if drift != 0 && !rows.is_empty() {
+        let mut largest = 0usize;
+        for (index, row) in rows.iter().enumerate() {
+            if row.bytes > rows[largest].bytes
+                || (row.bytes == rows[largest].bytes
+                    && row.language < rows[largest].language)
+            {
+                largest = index;
+            }
+        }
+        tenths[largest] = (tenths[largest] as i32 + drift).clamp(0, 1000) as u16;
+    }
+
+    tenths
+}
+
+/// Format share tenths as a percentage with one decimal place.
+fn share_label(tenths: u16) -> String {
+    format!("{}.{}%", tenths / 10, tenths % 10)
 }

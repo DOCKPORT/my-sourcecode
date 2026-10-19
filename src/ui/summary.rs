@@ -1,5 +1,5 @@
 use crate::scan::{FileRow, LanguageRow};
-use crate::ui::format::commas;
+use crate::ui::format::{average, commas};
 use crate::ui::table::draw_table;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Rect};
@@ -13,6 +13,7 @@ pub struct Summary {
     code: usize,
     comments: usize,
     blanks: usize,
+    bytes: usize,
 }
 
 impl Summary {
@@ -25,14 +26,24 @@ impl Summary {
             code: files.iter().map(|row| row.code).sum(),
             comments: files.iter().map(|row| row.comments).sum(),
             blanks: files.iter().map(|row| row.blanks).sum(),
+            bytes: languages.iter().map(|row| row.bytes).sum(),
         }
     }
 
     /// Draw the totals as a table with one data row.
     pub fn draw(&self, frame: &mut Frame<'_>, area: Rect) {
-        let header = ["files", "languages", "lines", "code", "comments", "blanks"]
-            .map(str::to_string)
-            .to_vec();
+        let header = [
+            "files",
+            "languages",
+            "lines",
+            "code",
+            "comments",
+            "blanks",
+            "bytes",
+            "avg lines/file",
+        ]
+        .map(str::to_string)
+        .to_vec();
         let row = vec![
             commas(self.files),
             commas(self.languages),
@@ -40,10 +51,12 @@ impl Summary {
             commas(self.code),
             commas(self.comments),
             commas(self.blanks),
+            commas(self.bytes),
+            average(self.lines, self.files),
         ];
 
-        let widths = [Constraint::Ratio(1, 6); 6];
-        let centered = [false; 6];
+        let widths = [Constraint::Ratio(1, 8); 8];
+        let centered = [false; 8];
         let block = Block::default().borders(Borders::ALL).title(" Totals ");
 
         draw_table(

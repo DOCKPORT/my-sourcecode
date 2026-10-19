@@ -2,6 +2,7 @@ use crate::scan::{self, Report};
 use crate::ui::Action;
 use crate::ui::bindings::{self, Command};
 use crate::ui::files::FileTable;
+use crate::ui::git::GitSummary;
 use crate::ui::languages::LanguageSummary;
 use crate::ui::picker::Picker;
 use crate::ui::summary::Summary;
@@ -27,6 +28,8 @@ pub struct App {
     files: Option<FileTable>,
     /// The language summary of the scanned repository.
     languages: Option<LanguageSummary>,
+    /// The repository information table of the scanned repository.
+    git: Option<GitSummary>,
     should_quit: bool,
 }
 
@@ -39,6 +42,7 @@ impl App {
             summary: None,
             files: None,
             languages: None,
+            git: None,
             should_quit: false,
         }
     }
@@ -73,6 +77,7 @@ impl App {
             root,
             files,
             languages,
+            git,
         } = report;
         let display = root.display().to_string();
 
@@ -80,6 +85,7 @@ impl App {
         self.summary = Some(summary);
         self.files = Some(FileTable::new(files));
         self.languages = Some(LanguageSummary::new(languages));
+        self.git = Some(GitSummary::new(git));
         self.root = Some(display);
     }
 
@@ -174,6 +180,7 @@ impl App {
                 self.summary = None;
                 self.files = None;
                 self.languages = None;
+                self.git = None;
             }
         }
     }
@@ -212,6 +219,7 @@ impl App {
                 .constraints([
                     Constraint::Length(5),
                     Constraint::Length(language_height),
+                    Constraint::Length(5),
                     Constraint::Min(5),
                 ])
                 .split(chunks[1]);
@@ -222,8 +230,11 @@ impl App {
             if let Some(languages) = self.languages.as_ref() {
                 languages.draw(frame, areas[1]);
             }
+            if let Some(git) = self.git.as_ref() {
+                git.draw(frame, areas[2]);
+            }
             if let Some(files) = self.files.as_mut() {
-                files.draw(frame, areas[2]);
+                files.draw(frame, areas[3]);
             }
         }
 

@@ -34,6 +34,8 @@ pub struct Report {
     pub files: Vec<FileRow>,
     /// One row per language, sorted by total lines.
     pub languages: Vec<LanguageRow>,
+    /// Read-only repository information for the Git table.
+    pub git: git::GitStats,
 }
 
 /// Scan a local git repository: verify it, list its files, filter them through
@@ -43,6 +45,7 @@ pub struct Report {
 /// rows, and the interface shows the empty state.
 pub fn scan(root: &Path) -> Result<Report, String> {
     git::verify_repository(root)?;
+    let git_stats = git::stats(root);
 
     let filter = LanguageFilter::from_embedded()?;
     let files: Vec<PathBuf> = git::list_files(root)?
@@ -55,6 +58,7 @@ pub fn scan(root: &Path) -> Result<Report, String> {
             root: root.to_path_buf(),
             files: Vec::new(),
             languages: Vec::new(),
+            git: git_stats,
         });
     }
 
@@ -108,6 +112,7 @@ pub fn scan(root: &Path) -> Result<Report, String> {
         root: root.to_path_buf(),
         files: file_rows,
         languages: language_rows,
+        git: git_stats,
     })
 }
 
