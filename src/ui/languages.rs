@@ -50,7 +50,7 @@ impl LanguageSummary {
         // Two borders and two header lines leave the body area. Each language
         // uses two lines because one blank line sits between entries.
         let body_height = area.height.saturating_sub(4) as usize;
-        let max_entries = (body_height + 1) / 2;
+        let max_entries = body_height.div_ceil(2);
         let overflow = self.rows.len().saturating_sub(max_entries);
         let shown = if overflow > 0 {
             max_entries.saturating_sub(1)
