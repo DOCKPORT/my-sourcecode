@@ -26,10 +26,6 @@ pub enum Command {
     OrderToggle,
     /// Begin editing the search term.
     StartSearch,
-    /// Show the next result view.
-    NextView,
-    /// Show the previous result view.
-    PreviousView,
     /// Jump 50 rows up.
     PageUp,
     /// Jump 50 rows down.
@@ -42,7 +38,7 @@ pub enum Command {
 ///
 /// `Esc` is the single exit key. Plain arrows move and confirm. Holding Shift
 /// with Left/Right picks the sort column. `Space` toggles the sort direction on
-/// the chosen column. Tab and BackTab switch result views.
+/// the chosen column.
 pub fn command_for_key(code: KeyCode, mods: KeyModifiers) -> Option<Command> {
     if code == KeyCode::Esc {
         return Some(Command::Quit);
@@ -51,14 +47,11 @@ pub fn command_for_key(code: KeyCode, mods: KeyModifiers) -> Option<Command> {
     match (code, shifted) {
         (KeyCode::Up, _) => Some(Command::MoveUp),
         (KeyCode::Down, _) => Some(Command::MoveDown),
-        (KeyCode::Right, false) => Some(Command::NextView),
-        (KeyCode::Right, true) => Some(Command::SortColumnRight),
         (KeyCode::Left, false) => Some(Command::Back),
         (KeyCode::Left, true) => Some(Command::SortColumnLeft),
+        (KeyCode::Right, true) => Some(Command::SortColumnRight),
         (KeyCode::Char(' '), false) => Some(Command::OrderToggle),
         (KeyCode::Char('s'), false) => Some(Command::StartSearch),
-        (KeyCode::Tab, _) => Some(Command::NextView),
-        (KeyCode::BackTab, _) => Some(Command::PreviousView),
         (KeyCode::PageUp, _) => Some(Command::PageUp),
         (KeyCode::PageDown, _) => Some(Command::PageDown),
         _ => None,
@@ -104,10 +97,5 @@ pub fn help_for_picker_input() -> &'static str {
 
 /// Help text for the file table.
 pub fn help_for_files() -> &'static str {
-    "↑/↓: scroll | PgUp/PgDn: 50 | Shift+←/→: sort column | Space: direction | s: search | Tab: languages | ←: repository | Esc: exit"
-}
-
-/// Help text for the language summary.
-pub fn help_for_languages() -> &'static str {
-    "↑/↓: scroll | PgUp/PgDn: 50 | Tab: files | ←: repository | Esc: exit"
+    "↑/↓: scroll | PgUp/PgDn: 50 | Shift+←/→: sort column | Space: direction | s: search | ←: repository | Esc: exit"
 }

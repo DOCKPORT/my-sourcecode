@@ -23,6 +23,7 @@ pub struct LanguageRow {
     pub code: usize,
     pub comments: usize,
     pub blanks: usize,
+    pub bytes: usize,
 }
 
 /// The complete scan result for one repository.
@@ -64,7 +65,21 @@ pub fn scan(root: &Path) -> Result<Report, String> {
     for (language_type, language) in languages.iter() {
         let language_name = language_type.to_string();
 
+        if !filter.allows_language(&language_name) {
+            continue;
+        }
+
+        let mut language_bytes = 0usize;
+
         for report in &language.reports {
+            // GitHub Linguist measures the language share by file bytes. The
+            // file is already in the git file list, so a metadata call is
+            // enough. An unreadable file adds no bytes.
+            let bytes = std::fs::metadata(&report.name)
+                .map(|metadata| metadata.len() as usize)
+                .unwrap_or(0);
+            language_bytes += bytes;
+
             file_rows.push(FileRow {
                 language: language_name.clone(),
                 path: display_path(root, &report.name),
@@ -82,11 +97,12 @@ pub fn scan(root: &Path) -> Result<Report, String> {
             code: language.code,
             comments: language.comments,
             blanks: language.blanks,
+            bytes: language_bytes,
         });
     }
 
     file_rows.sort_by_key(|row| (Reverse(row.code), Reverse(row.lines), row.path.clone()));
-    language_rows.sort_by_key(|row| (Reverse(row.lines), Reverse(row.code), row.language.clone()));
+    language_rows.sort_by_key(|row| (Reverse(row.bytes), Reverse(row.lines), row.language.clone()));
 
     Ok(Report {
         root: root.to_path_buf(),

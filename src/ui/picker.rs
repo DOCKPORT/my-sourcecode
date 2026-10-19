@@ -92,8 +92,6 @@ impl Picker {
             | Command::SortColumnRight
             | Command::OrderToggle
             | Command::StartSearch
-            | Command::NextView
-            | Command::PreviousView
             | Command::PageUp
             | Command::PageDown => None,
         }

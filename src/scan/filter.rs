@@ -20,6 +20,7 @@ struct LanguageEntry {
 pub struct LanguageFilter {
     extensions: HashSet<String>,
     filenames: HashSet<String>,
+    denied_languages: HashSet<String>,
 }
 
 impl LanguageFilter {
@@ -35,11 +36,13 @@ impl LanguageFilter {
 
         let mut extensions = HashSet::new();
         let mut filenames = HashSet::new();
+        let mut denied_languages = HashSet::new();
 
-        for entry in entries.values() {
+        for (name, entry) in &entries {
             let kind = entry.kind.trim().to_ascii_lowercase();
 
             if kind != "programming" && kind != "markup" {
+                denied_languages.insert(name.to_ascii_lowercase());
                 continue;
             }
 
@@ -59,7 +62,20 @@ impl LanguageFilter {
         Ok(Self {
             extensions,
             filenames,
+            denied_languages,
         })
+    }
+
+    /// Check whether tokei detected an allowed language type.
+    ///
+    /// Some extensions belong to more than one Linguist language. For example,
+    /// `.md` belongs to Markdown (`prose`) and GCC Machine Description
+    /// (`programming`). The extension allowlist cannot separate them, so the
+    /// detected language name is checked here as well.
+    pub fn allows_language(&self, language: &str) -> bool {
+        !self
+            .denied_languages
+            .contains(&language.trim().to_ascii_lowercase())
     }
 
     /// Check whether a path is allowed by the policy.

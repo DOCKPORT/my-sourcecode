@@ -2,8 +2,9 @@ use crate::scan::{self, Report};
 use crate::ui::Action;
 use crate::ui::bindings::{self, Command};
 use crate::ui::files::FileTable;
-use crate::ui::languages::LanguageTable;
+use crate::ui::languages::LanguageSummary;
 use crate::ui::picker::Picker;
+use crate::ui::summary::Summary;
 use crate::ui::tui::{self, TuiTerminal};
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
@@ -13,29 +14,19 @@ use ratatui::text::Text;
 use ratatui::widgets::Paragraph;
 use std::path::Path;
 
-/// Which result view is showing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum View {
-    /// The table of counted files.
-    Files,
-    /// The summary of languages.
-    Languages,
-}
-
 /// The application shell. Before a scan it shows the repository picker; after
-/// a scan it switches between the file table and the language summary. Each
-/// screen holds its own state and drawing.
+/// a scan it shows the totals, the language summary, and the file table.
 pub struct App {
     /// The repository picker, always available.
     picker: Picker,
     /// Display path of the scanned repository.
     root: Option<String>,
+    /// Repository totals shown above the tables.
+    summary: Option<Summary>,
     /// The file table of the scanned repository.
     files: Option<FileTable>,
     /// The language summary of the scanned repository.
-    languages: Option<LanguageTable>,
-    /// The active result view.
-    view: View,
+    languages: Option<LanguageSummary>,
     should_quit: bool,
 }
 
@@ -45,26 +36,39 @@ impl App {
         Self {
             picker: Picker::new(),
             root: None,
+            summary: None,
             files: None,
             languages: None,
-            view: View::Files,
             should_quit: false,
         }
     }
 
     /// Scan `path` and show its results. A failure is reported in the picker so
     /// the user can correct the path without losing the session.
+    ///
+    /// The path is made absolute first. A relative argument such as `.` must
+    /// not enter the recent list as a relative entry.
     pub fn open_repository(&mut self, path: &Path) {
-        match scan::scan(path) {
+        let root = match std::fs::canonicalize(path) {
+            Ok(root) => root,
+            Err(error) => {
+                self.picker
+                    .report(format!("Cannot open {}: {error}", path.display()));
+                return;
+            }
+        };
+
+        match scan::scan(&root) {
             Ok(report) => self.enter_results(report),
             Err(error) => self
                 .picker
-                .report(format!("Cannot scan {}: {error}", path.display())),
+                .report(format!("Cannot scan {}: {error}", root.display())),
         }
     }
 
     /// Build the result screens from a finished scan.
     fn enter_results(&mut self, report: Report) {
+        let summary = Summary::new(&report.files, &report.languages);
         let Report {
             root,
             files,
@@ -73,10 +77,10 @@ impl App {
         let display = root.display().to_string();
 
         self.picker.record_recent(&display);
+        self.summary = Some(summary);
         self.files = Some(FileTable::new(files));
-        self.languages = Some(LanguageTable::new(languages));
+        self.languages = Some(LanguageSummary::new(languages));
         self.root = Some(display);
-        self.view = View::Files;
     }
 
     /// Run the draw and input loop until the user quits, then restore the
@@ -131,13 +135,7 @@ impl App {
                 let action = if self.files.is_none() {
                     self.picker.handle(command)
                 } else {
-                    match self.view {
-                        View::Files => self.files.as_mut().and_then(|files| files.handle(command)),
-                        View::Languages => self
-                            .languages
-                            .as_mut()
-                            .and_then(|languages| languages.handle(command)),
-                    }
+                    self.files.as_mut().and_then(|files| files.handle(command))
                 };
 
                 self.apply(action);
@@ -155,8 +153,7 @@ impl App {
         if self.files.is_none() && self.picker.is_typing() {
             return bindings::command_for_text_key(code, mods);
         }
-        if self.view == View::Files
-            && let Some(files) = self.files.as_ref()
+        if let Some(files) = self.files.as_ref()
             && files.searching()
         {
             return bindings::command_for_search_key(code, mods);
@@ -174,16 +171,9 @@ impl App {
             Action::ScanRepository(path) => self.open_repository(Path::new(&path)),
             Action::BackToPicker => {
                 self.root = None;
+                self.summary = None;
                 self.files = None;
                 self.languages = None;
-            }
-            Action::NextView | Action::PreviousView => {
-                if self.files.is_some() {
-                    self.view = match self.view {
-                        View::Files => View::Languages,
-                        View::Languages => View::Files,
-                    };
-                }
             }
         }
     }
@@ -215,17 +205,25 @@ impl App {
         if self.files.is_none() {
             self.picker.draw(frame, chunks[1]);
         } else {
-            match self.view {
-                View::Files => {
-                    if let Some(files) = self.files.as_mut() {
-                        files.draw(frame, chunks[1]);
-                    }
-                }
-                View::Languages => {
-                    if let Some(languages) = self.languages.as_mut() {
-                        languages.draw(frame, chunks[1]);
-                    }
-                }
+            let language_count = self.languages.as_ref().map_or(0, LanguageSummary::len);
+            let language_height = language_area_height(chunks[1].height, language_count);
+            let areas = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(5),
+                    Constraint::Length(language_height),
+                    Constraint::Min(5),
+                ])
+                .split(chunks[1]);
+
+            if let Some(summary) = self.summary.as_ref() {
+                summary.draw(frame, areas[0]);
+            }
+            if let Some(languages) = self.languages.as_ref() {
+                languages.draw(frame, areas[1]);
+            }
+            if let Some(files) = self.files.as_mut() {
+                files.draw(frame, areas[2]);
             }
         }
 
@@ -243,41 +241,41 @@ impl App {
             return (format!(" {} ", self.picker.footer_help()), None);
         }
 
-        match self.view {
-            View::Files => {
-                let Some(files) = self.files.as_ref() else {
-                    return (String::new(), None);
-                };
-                if files.searching() {
-                    let prefix = " /search: ";
-                    let term = files.search_term();
-                    let x = (prefix.chars().count() + term.chars().count()) as u16;
-                    return (format!("{prefix}{term}"), Some(x));
-                }
-                (
-                    format!(
-                        " {}/{} files | {} ",
-                        files.cursor(),
-                        files.shown(),
-                        bindings::help_for_files()
-                    ),
-                    None,
-                )
-            }
-            View::Languages => {
-                let Some(languages) = self.languages.as_ref() else {
-                    return (String::new(), None);
-                };
-                (
-                    format!(
-                        " {}/{} languages | {} ",
-                        languages.cursor(),
-                        languages.len(),
-                        bindings::help_for_languages()
-                    ),
-                    None,
-                )
-            }
+        let Some(files) = self.files.as_ref() else {
+            return (String::new(), None);
+        };
+
+        if files.searching() {
+            let prefix = " /search: ";
+            let term = files.search_term();
+            let x = (prefix.chars().count() + term.chars().count()) as u16;
+            return (format!("{prefix}{term}"), Some(x));
         }
+
+        (
+            format!(
+                " {}/{} files | {} ",
+                files.cursor(),
+                files.shown(),
+                bindings::help_for_files()
+            ),
+            None,
+        )
     }
+}
+
+/// Height for the language summary.
+///
+/// Each language uses two lines because one blank line sits between entries.
+/// The header, the rule, and the borders add three lines. The summary uses at
+/// most one third of the content area and at most ten languages, so the file
+/// table always keeps useful space.
+fn language_area_height(content_height: u16, languages: usize) -> u16 {
+    if languages == 0 {
+        return 3;
+    }
+    let budget = (content_height / 3).max(5);
+    let max_entries = (budget.saturating_sub(3) / 2).max(1);
+    let rows = (languages as u16).min(10).min(max_entries);
+    rows * 2 + 3
 }

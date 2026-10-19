@@ -4,6 +4,8 @@ pub mod files;
 pub mod format;
 pub mod languages;
 pub mod picker;
+pub mod summary;
+pub mod table;
 pub mod tui;
 
 pub use action::Action;

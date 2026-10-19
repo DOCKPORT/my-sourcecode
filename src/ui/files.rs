@@ -2,11 +2,11 @@ use crate::scan::FileRow;
 use crate::ui::Action;
 use crate::ui::bindings::Command;
 use crate::ui::format::commas;
+use crate::ui::table::draw_table;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Rect};
-use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Text;
-use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState};
+use ratatui::widgets::{Block, Borders, Paragraph, TableState};
 use std::cmp::Ordering;
 
 /// How many rows one page key jumps at a time.
@@ -190,8 +190,6 @@ impl FileTable {
                     Some(Action::BackToPicker)
                 }
             }
-            Command::NextView => Some(Action::NextView),
-            Command::PreviousView => Some(Action::PreviousView),
             Command::Quit => Some(Action::Quit),
             Command::OpenRecent => None,
         }
@@ -268,28 +266,30 @@ impl FileTable {
             return;
         }
 
-        let header = Row::new(vec![
-            header_cell(SortColumn::Path, self.sort_col, self.ascending),
-            header_cell(SortColumn::Language, self.sort_col, self.ascending),
-            header_cell(SortColumn::Lines, self.sort_col, self.ascending),
-            header_cell(SortColumn::Code, self.sort_col, self.ascending),
-            header_cell(SortColumn::Comments, self.sort_col, self.ascending),
-            header_cell(SortColumn::Blanks, self.sort_col, self.ascending),
-        ]);
+        let header: Vec<String> = [
+            SortColumn::Path,
+            SortColumn::Language,
+            SortColumn::Lines,
+            SortColumn::Code,
+            SortColumn::Comments,
+            SortColumn::Blanks,
+        ]
+        .map(|column| header_label(column, self.sort_col, self.ascending))
+        .to_vec();
 
-        let rows: Vec<Row> = self
+        let rows: Vec<Vec<String>> = self
             .visible
             .iter()
             .map(|&index| {
                 let row = &self.rows[index];
-                Row::new(vec![
-                    Cell::from(Text::raw(row.path.clone())),
-                    Cell::from(Text::raw(row.language.clone())),
-                    Cell::from(Text::raw(commas(row.lines))),
-                    Cell::from(Text::raw(commas(row.code))),
-                    Cell::from(Text::raw(commas(row.comments))),
-                    Cell::from(Text::raw(commas(row.blanks))),
-                ])
+                vec![
+                    row.path.clone(),
+                    row.language.clone(),
+                    commas(row.lines),
+                    commas(row.code),
+                    commas(row.comments),
+                    commas(row.blanks),
+                ]
             })
             .collect();
 
@@ -301,30 +301,30 @@ impl FileTable {
             Constraint::Length(10),
             Constraint::Length(10),
         ];
+        let left_aligned = [true, false, false, false, false, false];
 
-        let table = Table::new(rows, widths)
-            .header(header)
-            .highlight_symbol("> ")
-            .highlight_style(
-                Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::LightGreen)
-                    .add_modifier(Modifier::BOLD),
-            )
-            .block(block);
-
-        frame.render_stateful_widget(table, area, &mut self.state);
+        draw_table(
+            frame,
+            area,
+            block,
+            &header,
+            rows,
+            &widths,
+            &left_aligned,
+            false,
+            true,
+            Some(&mut self.state),
+        );
     }
 }
 
-fn header_cell(column: SortColumn, active: SortColumn, ascending: bool) -> Cell<'static> {
-    let label = if column == active {
+fn header_label(column: SortColumn, active: SortColumn, ascending: bool) -> String {
+    if column == active {
         let marker = if ascending { " ^" } else { " v" };
         format!("{}{marker}", column.label())
     } else {
         column.label().to_string()
-    };
-    Cell::from(Text::raw(label))
+    }
 }
 
 fn compare_rows(left: &FileRow, right: &FileRow, column: SortColumn) -> Ordering {

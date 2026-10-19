@@ -11,8 +11,4 @@ pub enum Action {
     ScanRepository(String),
     /// Return from the results to the repository picker.
     BackToPicker,
-    /// Show the next result view.
-    NextView,
-    /// Show the previous result view.
-    PreviousView,
 }
