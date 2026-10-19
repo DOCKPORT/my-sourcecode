@@ -17,8 +17,7 @@
 | Component | Technology |
 |---|---|
 | Language | Rust |
-| TUI framework | ratatui |
-| Terminal backend | crossterm |
+| TUI  | ratatui |
 | Statistics library | tokei |
 
 ## How to Run
