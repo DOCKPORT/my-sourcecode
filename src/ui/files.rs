@@ -123,11 +123,12 @@ impl FileTable {
         self.state.selected().map_or(0, |index| index + 1)
     }
 
-    /// Relative path of the selected file, if a row is selected.
-    pub fn selected_path(&self) -> Option<&str> {
+    /// Relative path and language of the selected file.
+    pub fn selected_file(&self) -> Option<(&str, &str)> {
         let position = self.state.selected()?;
         let index = *self.visible.get(position)?;
-        Some(&self.rows[index].path)
+        let row = &self.rows[index];
+        Some((&row.path, &row.language))
     }
 
     /// Handle one command. Returns an action only when the command leaves this
@@ -183,9 +184,10 @@ impl FileTable {
                 }
                 None
             }
-            Command::Open => self
-                .selected_path()
-                .map(|path| Action::OpenFile(path.to_string())),
+            Command::Open => self.selected_file().map(|(path, language)| Action::OpenFile {
+                path: path.to_string(),
+                language: language.to_string(),
+            }),
             Command::Back => {
                 if self.searching || !self.search.is_empty() {
                     self.searching = false;

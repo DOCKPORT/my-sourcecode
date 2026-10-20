@@ -15,8 +15,8 @@ pub enum Action {
     ShowLanguages,
     /// Close the language overlay.
     CloseLanguages,
-    /// Open the read-only file viewer for the relative path.
-    OpenFile(String),
+    /// Open the read-only file viewer for the relative path and language.
+    OpenFile { path: String, language: String },
     /// Close the file viewer.
     CloseFile,
 }

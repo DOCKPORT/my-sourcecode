@@ -210,9 +210,9 @@ impl App {
                 }
             }
             Action::CloseLanguages => self.languages_overlay = None,
-            Action::OpenFile(path) => {
+            Action::OpenFile { path, language } => {
                 if let Some(root) = self.root.as_deref() {
-                    self.file_view = Some(FileView::open(Path::new(root), &path));
+                    self.file_view = Some(FileView::open(Path::new(root), &path, &language));
                 }
             }
             Action::CloseFile => self.file_view = None,
