@@ -26,6 +26,30 @@ impl LanguageSummary {
         self.rows.len()
     }
 
+    /// Every language as a display row, for the overlay.
+    pub fn display_rows(&self) -> Vec<Vec<String>> {
+        self.rows
+            .iter()
+            .enumerate()
+            .map(|(index, row)| self.row_cells(index, row))
+            .collect()
+    }
+
+    /// Build one formatted table row.
+    fn row_cells(&self, index: usize, row: &LanguageRow) -> Vec<String> {
+        vec![
+            row.language.clone(),
+            commas(row.files),
+            commas(row.lines),
+            commas(row.code),
+            commas(row.comments),
+            commas(row.blanks),
+            commas(row.bytes),
+            share_label(self.shares.get(index).copied().unwrap_or(0)),
+            average(row.lines, row.files),
+        ]
+    }
+
     /// Draw the summary into the given area.
     ///
     /// When the rows do not fit, the last row reports how many languages are
@@ -72,17 +96,7 @@ impl LanguageSummary {
             if index > 0 {
                 table_rows.push(blank_row());
             }
-            table_rows.push(vec![
-                row.language.clone(),
-                commas(row.files),
-                commas(row.lines),
-                commas(row.code),
-                commas(row.comments),
-                commas(row.blanks),
-                commas(row.bytes),
-                share_label(self.shares.get(index).copied().unwrap_or(0)),
-                average(row.lines, row.files),
-            ]);
+            table_rows.push(self.row_cells(index, row));
         }
 
         if overflow > 0 {

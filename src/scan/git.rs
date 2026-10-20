@@ -56,6 +56,7 @@ pub struct GitStats {
     pub commits: usize,
     pub tags: usize,
     pub latest_tag: String,
+    pub first_commit: String,
     pub last_commit: String,
 }
 
@@ -78,6 +79,16 @@ pub fn stats(root: &Path) -> GitStats {
         .unwrap_or("none")
         .to_string();
 
+    let first_commit = run_git(root, &["log", "--max-parents=0", "--format=%cs", "HEAD"])
+        .and_then(|value| {
+            value
+                .lines()
+                .find(|line| !line.is_empty())
+                .map(str::to_string)
+        })
+        .map(|value| format_date(&value))
+        .unwrap_or_else(|| "none".to_string());
+
     let last_commit = run_git(root, &["log", "-1", "--format=%cs"])
         .filter(|value| !value.is_empty())
         .map(|value| format_date(&value))
@@ -88,6 +99,7 @@ pub fn stats(root: &Path) -> GitStats {
         commits,
         tags,
         latest_tag,
+        first_commit,
         last_commit,
     }
 }

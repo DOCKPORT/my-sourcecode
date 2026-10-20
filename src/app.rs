@@ -3,6 +3,7 @@ use crate::ui::Action;
 use crate::ui::bindings::{self, Command};
 use crate::ui::files::FileTable;
 use crate::ui::git::GitSummary;
+use crate::ui::language_overlay::LanguageOverlay;
 use crate::ui::languages::LanguageSummary;
 use crate::ui::picker::Picker;
 use crate::ui::summary::Summary;
@@ -10,7 +11,7 @@ use crate::ui::tui::{self, TuiTerminal};
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use ratatui::Frame;
-use ratatui::layout::{Constraint, Direction, Layout};
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::text::Text;
 use ratatui::widgets::Paragraph;
 use std::path::Path;
@@ -30,6 +31,8 @@ pub struct App {
     languages: Option<LanguageSummary>,
     /// The repository information table of the scanned repository.
     git: Option<GitSummary>,
+    /// The full language list overlay, while it is open.
+    languages_overlay: Option<LanguageOverlay>,
     should_quit: bool,
 }
 
@@ -43,6 +46,7 @@ impl App {
             files: None,
             languages: None,
             git: None,
+            languages_overlay: None,
             should_quit: false,
         }
     }
@@ -86,6 +90,7 @@ impl App {
         self.files = Some(FileTable::new(files));
         self.languages = Some(LanguageSummary::new(languages));
         self.git = Some(GitSummary::new(git));
+        self.languages_overlay = None;
         self.root = Some(display);
     }
 
@@ -138,7 +143,9 @@ impl App {
                     return Ok(false);
                 };
 
-                let action = if self.files.is_none() {
+                let action = if let Some(overlay) = self.languages_overlay.as_mut() {
+                    overlay.handle(command)
+                } else if self.files.is_none() {
                     self.picker.handle(command)
                 } else {
                     self.files.as_mut().and_then(|files| files.handle(command))
@@ -156,6 +163,9 @@ impl App {
     /// edits a search term, characters refine the query instead of running
     /// commands.
     fn map_command(&self, code: KeyCode, mods: KeyModifiers) -> Option<Command> {
+        if self.languages_overlay.is_some() {
+            return bindings::command_for_overlay_key(code, mods);
+        }
         if self.files.is_none() && self.picker.is_typing() {
             return bindings::command_for_text_key(code, mods);
         }
@@ -181,7 +191,14 @@ impl App {
                 self.files = None;
                 self.languages = None;
                 self.git = None;
+                self.languages_overlay = None;
             }
+            Action::ShowLanguages => {
+                if let Some(languages) = self.languages.as_ref() {
+                    self.languages_overlay = Some(LanguageOverlay::new(languages.display_rows()));
+                }
+            }
+            Action::CloseLanguages => self.languages_overlay = None,
         }
     }
 }
@@ -238,6 +255,19 @@ impl App {
             }
         }
 
+        if let Some(overlay) = self.languages_overlay.as_mut() {
+            let screen = frame.size();
+            let width = screen.width * 8 / 10;
+            let height = screen.height * 8 / 10;
+            let area = Rect {
+                x: screen.x + screen.width.saturating_sub(width) / 2,
+                y: screen.y + screen.height.saturating_sub(height) / 2,
+                width,
+                height,
+            };
+            overlay.draw(frame, area);
+        }
+
         let (footer, cursor_x) = self.footer();
         frame.render_widget(Paragraph::new(Text::raw(footer)), chunks[2]);
         if let Some(x) = cursor_x {
@@ -248,6 +278,9 @@ impl App {
 
     /// The footer text and, while a search term is typed, the cursor column.
     fn footer(&self) -> (String, Option<u16>) {
+        if self.languages_overlay.is_some() {
+            return (format!(" {} ", bindings::help_for_overlay()), None);
+        }
         if self.files.is_none() {
             return (format!(" {} ", self.picker.footer_help()), None);
         }
@@ -257,11 +290,14 @@ impl App {
         };
 
         if files.searching() {
-            let prefix = " /search: ";
-            let term = files.search_term();
-            let x = (prefix.chars().count() + term.chars().count()) as u16;
-            return (format!("{prefix}{term}"), Some(x));
-        }
+        let prefix = " /search: ";
+        let term = files.search_term();
+        let x = (prefix.chars().count() + term.chars().count()) as u16;
+        return (
+                format!("{prefix}{term} | Esc: cancel | Enter: apply"),
+                        Some(x),
+                    );
+                }
 
         (
             format!(

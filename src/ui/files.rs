@@ -84,7 +84,7 @@ impl FileTable {
             rows,
             visible,
             state: TableState::default(),
-            sort_col: SortColumn::Code,
+            sort_col: SortColumn::Lines,
             ascending: false,
             search: String::new(),
             searching: false,
@@ -190,6 +190,7 @@ impl FileTable {
                     Some(Action::BackToPicker)
                 }
             }
+            Command::OpenLanguages => Some(Action::ShowLanguages),
             Command::Quit => Some(Action::Quit),
             Command::OpenRecent => None,
         }

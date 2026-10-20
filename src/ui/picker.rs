@@ -92,6 +92,7 @@ impl Picker {
             | Command::SortColumnRight
             | Command::OrderToggle
             | Command::StartSearch
+            | Command::OpenLanguages
             | Command::PageUp
             | Command::PageDown => None,
         }

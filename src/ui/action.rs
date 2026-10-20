@@ -11,4 +11,8 @@ pub enum Action {
     ScanRepository(String),
     /// Return from the results to the repository picker.
     BackToPicker,
+    /// Open the full language overlay.
+    ShowLanguages,
+    /// Close the language overlay.
+    CloseLanguages,
 }

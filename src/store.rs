@@ -2,7 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// Maximum number of recent paths kept on disk.
-const MAX_RECENTS: usize = 5;
+const MAX_RECENTS: usize = 20;
 
 /// The most recent repository paths the user opened, persisted as JSON under
 /// `~/.local/share/my-sourcecode/recents.json`.

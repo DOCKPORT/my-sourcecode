@@ -18,19 +18,27 @@ impl GitSummary {
 
     /// Draw the Git table into the given area.
     pub fn draw(&self, frame: &mut Frame<'_>, area: Rect) {
-        let header = ["branch", "commits", "tags", "latest tag", "last commit"]
-            .map(str::to_string)
-            .to_vec();
+        let header = [
+            "branch",
+            "commits",
+            "tags",
+            "latest tag",
+            "first commit",
+            "last commit",
+        ]
+        .map(str::to_string)
+        .to_vec();
         let row = vec![
             self.stats.branch.clone(),
             commas(self.stats.commits),
             commas(self.stats.tags),
             self.stats.latest_tag.clone(),
+            self.stats.first_commit.clone(),
             self.stats.last_commit.clone(),
         ];
 
-        let widths = [Constraint::Ratio(1, 5); 5];
-        let centered = [false; 5];
+        let widths = [Constraint::Ratio(1, 6); 6];
+        let centered = [false; 6];
         let block = Block::default().borders(Borders::ALL).title(" Git ");
 
         draw_table(
