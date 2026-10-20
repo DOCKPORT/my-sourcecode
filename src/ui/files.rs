@@ -123,6 +123,13 @@ impl FileTable {
         self.state.selected().map_or(0, |index| index + 1)
     }
 
+    /// Relative path of the selected file, if a row is selected.
+    pub fn selected_path(&self) -> Option<&str> {
+        let position = self.state.selected()?;
+        let index = *self.visible.get(position)?;
+        Some(&self.rows[index].path)
+    }
+
     /// Handle one command. Returns an action only when the command leaves this
     /// screen. Key-to-command mapping lives in the bindings module.
     pub fn handle(&mut self, command: Command) -> Option<Action> {
@@ -176,10 +183,9 @@ impl FileTable {
                 }
                 None
             }
-            Command::Open => {
-                self.searching = false;
-                None
-            }
+            Command::Open => self
+                .selected_path()
+                .map(|path| Action::OpenFile(path.to_string())),
             Command::Back => {
                 if self.searching || !self.search.is_empty() {
                     self.searching = false;

@@ -1,6 +1,6 @@
 use crate::ui::Action;
 use crate::ui::bindings::Command;
-use crate::ui::table::{draw_table, TableSpec};
+use crate::ui::table::{TableSpec, draw_table};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Rect};
 use ratatui::text::Text;

@@ -49,12 +49,14 @@ pub fn command_for_key(code: KeyCode, mods: KeyModifiers) -> Option<Command> {
     match (code, shifted) {
         (KeyCode::Up, _) => Some(Command::MoveUp),
         (KeyCode::Down, _) => Some(Command::MoveDown),
+        (KeyCode::Right, false) => Some(Command::Open),
         (KeyCode::Left, false) => Some(Command::Back),
         (KeyCode::Left, true) => Some(Command::SortColumnLeft),
         (KeyCode::Right, true) => Some(Command::SortColumnRight),
         (KeyCode::Char(' '), false) => Some(Command::OrderToggle),
         (KeyCode::Char('s'), false) => Some(Command::StartSearch),
         (KeyCode::Char('l'), false) => Some(Command::OpenLanguages),
+        (KeyCode::Char('L'), false) => Some(Command::OpenLanguages),
         (KeyCode::PageUp, _) => Some(Command::PageUp),
         (KeyCode::PageDown, _) => Some(Command::PageDown),
         _ => None,
@@ -78,13 +80,28 @@ pub fn command_for_text_key(code: KeyCode, _mods: KeyModifiers) -> Option<Comman
     }
 }
 
+/// Map a key to a [`Command`] while the file viewer is open.
+///
+/// Left closes the viewer. Up/Down and the page keys scroll the file. Esc does
+/// nothing here, so the user must close the viewer before exiting.
+pub fn command_for_file_view_key(code: KeyCode, _mods: KeyModifiers) -> Option<Command> {
+    match code {
+        KeyCode::Left => Some(Command::Back),
+        KeyCode::Up => Some(Command::MoveUp),
+        KeyCode::Down => Some(Command::MoveDown),
+        KeyCode::PageUp => Some(Command::PageUp),
+        KeyCode::PageDown => Some(Command::PageDown),
+        _ => None,
+    }
+}
+
 /// Map a key to a [`Command`] while the language overlay is open.
 ///
-/// Esc closes the overlay instead of quitting the application. The page keys
-/// scroll the list; other keys do nothing.
+/// `L` closes the overlay. The page keys scroll the list. Esc does nothing while
+/// the overlay is open, so the user must close it before exiting.
 pub fn command_for_overlay_key(code: KeyCode, _mods: KeyModifiers) -> Option<Command> {
     match code {
-        KeyCode::Esc => Some(Command::Back),
+        KeyCode::Char('l') | KeyCode::Char('L') => Some(Command::Back),
         KeyCode::Up => Some(Command::MoveUp),
         KeyCode::Down => Some(Command::MoveDown),
         KeyCode::PageUp => Some(Command::PageUp),
@@ -94,30 +111,35 @@ pub fn command_for_overlay_key(code: KeyCode, _mods: KeyModifiers) -> Option<Com
 }
 
 /// Map a key to a [`Command`] while the user is typing a search term in the
-/// file table. Characters edit the term live; Backspace removes a character;
-/// Enter commits the search; Esc clears the search and leaves search mode.
-/// The application keeps running, so a second Esc exits from the normal map.
+/// file table. The filter applies live as characters arrive; Backspace removes
+/// a character; Esc clears the search and leaves search mode. Enter does
+/// nothing here. The application keeps running, so a second Esc exits from the
+/// normal map.
 pub fn command_for_search_key(code: KeyCode, _mods: KeyModifiers) -> Option<Command> {
     match code {
         KeyCode::Esc => Some(Command::Back),
         KeyCode::Char(c) if !c.is_control() => Some(Command::Type(c)),
         KeyCode::Backspace => Some(Command::EraseChar),
-        KeyCode::Enter => Some(Command::Open),
         _ => None,
     }
 }
 
 /// Help text while typing a repository path.
 pub fn help_for_picker_input() -> &'static str {
-    "type a git repository path | Enter: scan | ↑/↓ then →: recent | Esc: exit"
+    "type a git repository path | Enter: open | ↑/↓: recent | Esc: exit"
+}
+
+/// Help text for the file viewer.
+pub fn help_for_file_view() -> &'static str {
+    "↑/↓: scroll | PgUp/PgDn: page | ←: close file"
 }
 
 /// Help text for the language overlay.
 pub fn help_for_overlay() -> &'static str {
-    "↑/↓: scroll | PgUp/PgDn: 50 | Esc: close"
+    "↑/↓: scroll | PgUp/PgDn: 50 | L: close all languages"
 }
 
 /// Help text for the file table.
 pub fn help_for_files() -> &'static str {
-    "↑/↓: scroll | PgUp/PgDn: 50 | Shift+←/→: sort column | Space: direction | s: search | l: all languages | ←: repository | Esc: exit"
+    "↑/↓: scroll | →: view file | PgUp/PgDn: 50 | Shift+←/→: sort | Space: direction | s: search | L: all languages | ←: home | Esc: exit"
 }

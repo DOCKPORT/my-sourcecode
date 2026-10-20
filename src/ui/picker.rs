@@ -102,13 +102,12 @@ impl Picker {
 impl Picker {
     /// Resolve the input path and ask the app to scan it.
     fn submit(&mut self) -> Option<Action> {
-        let raw = if self.input.trim().is_empty() {
-            match self.recent_selected {
-                Some(index) => self.recents.entries().get(index).cloned(),
-                None => None,
-            }
-        } else {
+        let raw = if let Some(index) = self.recent_selected {
+            self.recents.entries().get(index).cloned()
+        } else if !self.input.trim().is_empty() {
             Some(self.input.clone())
+        } else {
+            None
         };
 
         let Some(raw) = raw else {
@@ -131,6 +130,7 @@ impl Picker {
         }
 
         self.input = root.display().to_string();
+        self.recent_selected = None;
         Some(Action::ScanRepository(root.display().to_string()))
     }
 
