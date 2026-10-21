@@ -9,6 +9,7 @@ pub mod languages;
 pub mod picker;
 pub mod summary;
 pub mod table;
+pub mod theme;
 pub mod tui;
 
 pub use action::Action;

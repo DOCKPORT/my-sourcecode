@@ -14,6 +14,8 @@ struct LanguageEntry {
     extensions: Vec<String>,
     #[serde(default)]
     filenames: Vec<String>,
+    #[serde(default)]
+    color: Option<String>,
 }
 
 /// Keeps files whose language type is programming or markup.
@@ -21,6 +23,7 @@ pub struct LanguageFilter {
     extensions: HashSet<String>,
     filenames: HashSet<String>,
     denied_languages: HashSet<String>,
+    colors: std::collections::HashMap<String, String>,
 }
 
 impl LanguageFilter {
@@ -37,8 +40,16 @@ impl LanguageFilter {
         let mut extensions = HashSet::new();
         let mut filenames = HashSet::new();
         let mut denied_languages = HashSet::new();
+        let mut colors = std::collections::HashMap::new();
 
         for (name, entry) in &entries {
+            if let Some(color) = entry.color.as_deref() {
+                let color = color.trim();
+                if !color.is_empty() {
+                    colors.insert(name.to_ascii_lowercase(), color.to_string());
+                }
+            }
+
             let kind = entry.kind.trim().to_ascii_lowercase();
 
             if kind != "programming" && kind != "markup" {
@@ -63,6 +74,7 @@ impl LanguageFilter {
             extensions,
             filenames,
             denied_languages,
+            colors,
         })
     }
 
@@ -76,6 +88,13 @@ impl LanguageFilter {
         !self
             .denied_languages
             .contains(&language.trim().to_ascii_lowercase())
+    }
+
+    /// The Linguist color for a language name, if one is defined.
+    pub fn color_for(&self, language: &str) -> Option<String> {
+        self.colors
+            .get(&language.trim().to_ascii_lowercase())
+            .cloned()
     }
 
     /// Check whether a path is allowed by the policy.

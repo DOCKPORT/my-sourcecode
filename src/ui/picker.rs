@@ -1,9 +1,10 @@
 use crate::store::RecentPaths;
 use crate::ui::Action;
 use crate::ui::bindings::{self, Command};
+use crate::ui::theme;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::Text;
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
 use std::path::PathBuf;
@@ -161,15 +162,24 @@ impl Picker {
 
         let status = self.status.clone().unwrap_or_default();
         frame.render_widget(
-            Paragraph::new(Text::raw(status)).style(Style::default().fg(Color::DarkGray)),
+            Paragraph::new(Text::raw(status)).style(
+                Style::default()
+                    .fg(theme::MUTED)
+                    .bg(theme::BACKGROUND),
+            ),
             chunks[0],
         );
 
-        let input = Paragraph::new(Text::raw(self.input.clone())).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(" Git repository "),
-        );
+        let input = Paragraph::new(Text::raw(self.input.clone()))
+            .style(Style::default().fg(theme::FOREGROUND).bg(theme::BACKGROUND))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(" Git repository ")
+                    .style(Style::default().bg(theme::BACKGROUND))
+                    .border_style(Style::default().fg(theme::BORDER))
+                    .title_style(Style::default().fg(theme::FOREGROUND)),
+            );
         frame.render_widget(input, chunks[1]);
 
         let width = chunks[1].width.saturating_sub(2) as usize;
@@ -190,14 +200,22 @@ impl Picker {
             " Recent "
         };
         let list = List::new(items)
+            .style(Style::default().fg(theme::FOREGROUND).bg(theme::BACKGROUND))
             .highlight_symbol("> ")
             .highlight_style(
                 Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::LightGreen)
+                    .fg(theme::SELECTED_FG)
+                    .bg(theme::SELECTED_BG)
                     .add_modifier(Modifier::BOLD),
             )
-            .block(Block::default().borders(Borders::ALL).title(title));
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(title)
+                    .style(Style::default().bg(theme::BACKGROUND))
+                    .border_style(Style::default().fg(theme::BORDER))
+                    .title_style(Style::default().fg(theme::FOREGROUND)),
+            );
 
         let mut state = ListState::default();
         state.select(self.recent_selected);

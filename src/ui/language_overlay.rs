@@ -1,8 +1,10 @@
 use crate::ui::Action;
 use crate::ui::bindings::Command;
 use crate::ui::table::{TableSpec, draw_table};
+use crate::ui::theme;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Rect};
+use ratatui::style::{Color, Style};
 use ratatui::text::Text;
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, TableState};
 
@@ -13,15 +15,20 @@ const PAGE_JUMP: isize = 50;
 /// height limit of the summary table.
 pub struct LanguageOverlay {
     rows: Vec<Vec<String>>,
+    colors: Vec<Option<Color>>,
     state: TableState,
 }
 
 impl LanguageOverlay {
     /// Build the overlay from all formatted language rows.
-    pub fn new(rows: Vec<Vec<String>>) -> Self {
+    pub fn new(rows: Vec<Vec<String>>, colors: Vec<Option<Color>>) -> Self {
         let mut state = TableState::default();
         state.select(if rows.is_empty() { None } else { Some(0) });
-        Self { rows, state }
+        Self {
+            rows,
+            colors,
+            state,
+        }
     }
 
     /// Handle one command from the overlay key map.
@@ -75,8 +82,14 @@ impl LanguageOverlay {
             .title(format!(" Languages ({}) ", self.rows.len()));
 
         if self.rows.is_empty() {
-            let message =
-                Paragraph::new(Text::raw("No languages found in this repository.")).block(block);
+            let message = Paragraph::new(Text::raw("No languages found in this repository."))
+                .style(Style::default().fg(theme::FOREGROUND).bg(theme::BACKGROUND))
+                .block(
+                    block
+                        .style(Style::default().bg(theme::BACKGROUND))
+                        .border_style(Style::default().fg(theme::BORDER))
+                        .title_style(Style::default().fg(theme::FOREGROUND)),
+                );
             frame.render_widget(message, area);
             return;
         }
@@ -119,6 +132,8 @@ impl LanguageOverlay {
                 left_aligned: centered.to_vec(),
                 row_rules: false,
                 body_dividers: false,
+                color_column: Some(0),
+                cell_colors: self.colors.clone(),
             },
             Some(&mut self.state),
         );

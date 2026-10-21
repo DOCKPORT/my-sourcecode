@@ -13,6 +13,7 @@ pub struct FileRow {
     pub code: usize,
     pub comments: usize,
     pub blanks: usize,
+    pub color: Option<String>,
 }
 
 /// Totals for one language, ready for display.
@@ -24,6 +25,7 @@ pub struct LanguageRow {
     pub comments: usize,
     pub blanks: usize,
     pub bytes: usize,
+    pub color: Option<String>,
 }
 
 /// The complete scan result for one repository.
@@ -73,6 +75,8 @@ pub fn scan(root: &Path) -> Result<Report, String> {
             continue;
         }
 
+        let color = filter.color_for(&language_name);
+
         let mut language_bytes = 0usize;
 
         for report in &language.reports {
@@ -91,6 +95,7 @@ pub fn scan(root: &Path) -> Result<Report, String> {
                 code: report.stats.code,
                 comments: report.stats.comments,
                 blanks: report.stats.blanks,
+                color: color.clone(),
             });
         }
 
@@ -102,6 +107,7 @@ pub fn scan(root: &Path) -> Result<Report, String> {
             comments: language.comments,
             blanks: language.blanks,
             bytes: language_bytes,
+            color,
         });
     }
 

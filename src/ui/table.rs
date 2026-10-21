@@ -1,3 +1,4 @@
+use crate::ui::theme;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -22,6 +23,9 @@ pub struct TableSpec<'a> {
     pub left_aligned: Vec<bool>,
     pub row_rules: bool,
     pub body_dividers: bool,
+    /// Optional per-row color for one column.
+    pub color_column: Option<usize>,
+    pub cell_colors: Vec<Option<Color>>,
 }
 
 /// Draw a table in three parts: the header, a subtle rule, and the body.
@@ -46,8 +50,14 @@ pub fn draw_table<'a>(
         left_aligned,
         row_rules,
         body_dividers,
+        color_column,
+        cell_colors,
     } = spec;
 
+    let block = block
+        .style(Style::default().bg(theme::BACKGROUND).fg(theme::FOREGROUND))
+        .border_style(Style::default().fg(theme::BORDER))
+        .title_style(Style::default().fg(theme::FOREGROUND));
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -78,6 +88,7 @@ pub fn draw_table<'a>(
     };
     let mut header_table = Table::new(Vec::<Row<'a>>::new(), widths.clone())
         .header(header_row)
+        .style(Style::default().fg(theme::FOREGROUND).bg(theme::BACKGROUND))
         .column_spacing(COLUMN_SPACING);
     if interactive {
         // Reserve the highlight symbol width in the header so that the header
@@ -99,7 +110,7 @@ pub fn draw_table<'a>(
             height: 1,
         };
         let rule = Paragraph::new(Text::raw(HEADER_RULE.repeat(inner.width as usize)))
-            .style(Style::default().fg(Color::DarkGray));
+            .style(Style::default().fg(theme::MUTED).bg(theme::BACKGROUND));
         frame.render_widget(rule, rule_area);
     }
 
@@ -112,20 +123,29 @@ pub fn draw_table<'a>(
         };
         let body_rows: Vec<Row> = rows
             .iter()
-            .map(|row| {
+            .enumerate()
+            .map(|(row_index, row)| {
                 let cells: Vec<Cell> = row
                     .iter()
                     .enumerate()
                     .map(|(index, value)| {
                         let width = column_widths.get(index).copied().unwrap_or(0);
                         let left = left_aligned.get(index).copied().unwrap_or(false);
-                        Cell::from(Text::raw(pad(value, width, left)))
+                        let mut cell = Cell::from(Text::raw(pad(value, width, left)));
+                        if color_column == Some(index)
+                            && let Some(Some(color)) = cell_colors.get(row_index)
+                        {
+                            cell = cell.style(Style::default().fg(*color));
+                        }
+                        cell
                     })
                     .collect();
                 Row::new(cells)
             })
             .collect();
-        let table = Table::new(body_rows, widths.clone()).column_spacing(COLUMN_SPACING);
+        let table = Table::new(body_rows, widths.clone())
+            .style(Style::default().fg(theme::FOREGROUND).bg(theme::BACKGROUND))
+            .column_spacing(COLUMN_SPACING);
 
         let draw_rules = row_rules && state.is_none();
         match state {
@@ -184,7 +204,7 @@ fn draw_row_rules(frame: &mut Frame<'_>, body_area: Rect, rows: &[Vec<String>]) 
             height: 1,
         };
         let line = Paragraph::new(Text::raw(HEADER_RULE.repeat(area.width as usize)))
-            .style(Style::default().fg(Color::DarkGray));
+            .style(Style::default().fg(theme::MUTED).bg(theme::BACKGROUND));
         frame.render_widget(line, area);
     }
 }
@@ -214,7 +234,7 @@ fn draw_dividers(frame: &mut Frame<'_>, inner: Rect, columns: &[Rect], body_divi
         for y in inner.top()..bottom {
             let cell = buffer.get_mut(x, y);
             cell.set_symbol(DIVIDER);
-            cell.set_fg(Color::DarkGray);
+            cell.set_fg(theme::MUTED);
         }
     }
 }
@@ -237,15 +257,18 @@ fn pad(text: &str, width: u16, left: bool) -> String {
     format!("{}{}{}", " ".repeat(before), text, " ".repeat(after))
 }
 
-/// Style for every header row. The terminal theme controls the color.
+/// Style for every header row.
 fn header_style() -> Style {
-    Style::default().add_modifier(Modifier::BOLD)
+    Style::default()
+        .fg(theme::HEADER)
+        .bg(theme::BACKGROUND)
+        .add_modifier(Modifier::BOLD)
 }
 
 /// Style for the selected file row.
 fn highlight_style() -> Style {
     Style::default()
-        .fg(Color::Black)
-        .bg(Color::LightGreen)
+        .fg(theme::SELECTED_FG)
+        .bg(theme::SELECTED_BG)
         .add_modifier(Modifier::BOLD)
 }

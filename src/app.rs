@@ -8,13 +8,15 @@ use crate::ui::language_overlay::LanguageOverlay;
 use crate::ui::languages::LanguageSummary;
 use crate::ui::picker::Picker;
 use crate::ui::summary::Summary;
+use crate::ui::theme;
 use crate::ui::tui::{self, TuiTerminal};
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::style::Style;
 use ratatui::text::Text;
-use ratatui::widgets::Paragraph;
+use ratatui::widgets::{Block, Paragraph};
 use std::path::Path;
 
 /// The application shell. Before a scan it shows the repository picker; after
@@ -206,7 +208,10 @@ impl App {
             }
             Action::ShowLanguages => {
                 if let Some(languages) = self.languages.as_ref() {
-                    self.languages_overlay = Some(LanguageOverlay::new(languages.display_rows()));
+                    self.languages_overlay = Some(LanguageOverlay::new(
+                        languages.display_rows(),
+                        languages.display_colors(),
+                    ));
                 }
             }
             Action::CloseLanguages => self.languages_overlay = None,
@@ -223,6 +228,15 @@ impl App {
 impl App {
     /// Draw the current frame.
     fn render(&mut self, frame: &mut Frame<'_>) {
+        frame.render_widget(
+            Block::default().style(
+                Style::default()
+                    .fg(theme::FOREGROUND)
+                    .bg(theme::BACKGROUND),
+            ),
+            frame.size(),
+        );
+
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
@@ -241,7 +255,11 @@ impl App {
             ),
             None => format!(" My-Sourcecode v{}", env!("CARGO_PKG_VERSION")),
         };
-        frame.render_widget(Paragraph::new(Text::raw(header)), chunks[0]);
+        frame.render_widget(
+            Paragraph::new(Text::raw(header))
+                .style(Style::default().fg(theme::FOREGROUND).bg(theme::BACKGROUND)),
+            chunks[0],
+        );
 
         if self.files.is_none() {
             self.picker.draw(frame, chunks[1]);
@@ -288,7 +306,11 @@ impl App {
         }
 
         let (footer, cursor_x) = self.footer();
-        frame.render_widget(Paragraph::new(Text::raw(footer)), chunks[2]);
+        frame.render_widget(
+            Paragraph::new(Text::raw(footer))
+                .style(Style::default().fg(theme::FOREGROUND).bg(theme::BACKGROUND)),
+            chunks[2],
+        );
         if let Some(x) = cursor_x {
             let x = x.min(chunks[2].right().saturating_sub(1));
             frame.set_cursor(x, chunks[2].y);

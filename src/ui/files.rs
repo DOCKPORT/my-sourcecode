@@ -3,8 +3,10 @@ use crate::ui::Action;
 use crate::ui::bindings::Command;
 use crate::ui::format::commas;
 use crate::ui::table::{TableSpec, draw_table};
+use crate::ui::theme;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Rect};
+use ratatui::style::Style;
 use ratatui::text::Text;
 use ratatui::widgets::{Block, Borders, Paragraph, TableState};
 use std::cmp::Ordering;
@@ -184,10 +186,12 @@ impl FileTable {
                 }
                 None
             }
-            Command::Open => self.selected_file().map(|(path, language)| Action::OpenFile {
-                path: path.to_string(),
-                language: language.to_string(),
-            }),
+            Command::Open => self
+                .selected_file()
+                .map(|(path, language)| Action::OpenFile {
+                    path: path.to_string(),
+                    language: language.to_string(),
+                }),
             Command::Back => {
                 if self.searching || !self.search.is_empty() {
                     self.searching = false;
@@ -270,7 +274,13 @@ impl FileTable {
             let message = Paragraph::new(Text::raw(
                 "No programming or markup files found in this repository.",
             ))
-            .block(block);
+            .style(Style::default().fg(theme::FOREGROUND).bg(theme::BACKGROUND))
+            .block(
+                block
+                    .style(Style::default().bg(theme::BACKGROUND))
+                    .border_style(Style::default().fg(theme::BORDER))
+                    .title_style(Style::default().fg(theme::FOREGROUND)),
+            );
             frame.render_widget(message, area);
             return;
         }
@@ -323,6 +333,17 @@ impl FileTable {
                 left_aligned: left_aligned.to_vec(),
                 row_rules: false,
                 body_dividers: true,
+                color_column: Some(1),
+                cell_colors: self
+                    .visible
+                    .iter()
+                    .map(|&index| {
+                        self.rows[index]
+                            .color
+                            .as_deref()
+                            .and_then(theme::language_color)
+                    })
+                    .collect(),
             },
             Some(&mut self.state),
         );

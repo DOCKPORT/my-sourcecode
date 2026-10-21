@@ -52,6 +52,8 @@ impl GitSummary {
                 left_aligned: centered.to_vec(),
                 row_rules: false,
                 body_dividers: true,
+                color_column: None,
+                cell_colors: Vec::new(),
             },
             None,
         );
