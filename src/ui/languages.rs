@@ -41,11 +41,7 @@ impl LanguageSummary {
     pub fn display_colors(&self) -> Vec<Option<Color>> {
         self.rows
             .iter()
-            .map(|row| {
-                row.color
-                    .as_deref()
-                    .and_then(theme::language_color)
-            })
+            .map(|row| row.color.as_deref().and_then(theme::language_color))
             .collect()
     }
 
@@ -119,11 +115,7 @@ impl LanguageSummary {
                 cell_colors.push(None);
             }
             table_rows.push(self.row_cells(index, row));
-            cell_colors.push(
-                row.color
-                    .as_deref()
-                    .and_then(theme::language_color),
-            );
+            cell_colors.push(row.color.as_deref().and_then(theme::language_color));
         }
 
         if overflow > 0 {

@@ -99,8 +99,8 @@ impl FileView {
             view.lines.push(String::new());
         }
         view.segments = vec![None; view.lines.len()];
-        view.highlighter = find_syntax(language, relative)
-            .map(|syntax| HighlightLines::new(syntax, theme()));
+        view.highlighter =
+            find_syntax(language, relative).map(|syntax| HighlightLines::new(syntax, theme()));
         view
     }
 

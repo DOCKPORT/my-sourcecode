@@ -26,8 +26,7 @@ pub fn language_color(hex: &str) -> Option<Color> {
 }
 
 fn readable(red: u8, green: u8, blue: u8) -> (u8, u8, u8) {
-    let luminance =
-        0.2126 * red as f32 + 0.7152 * green as f32 + 0.0722 * blue as f32;
+    let luminance = 0.2126 * red as f32 + 0.7152 * green as f32 + 0.0722 * blue as f32;
     if luminance >= 110.0 {
         return (red, green, blue);
     }

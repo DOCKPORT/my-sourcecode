@@ -162,11 +162,8 @@ impl Picker {
 
         let status = self.status.clone().unwrap_or_default();
         frame.render_widget(
-            Paragraph::new(Text::raw(status)).style(
-                Style::default()
-                    .fg(theme::MUTED)
-                    .bg(theme::BACKGROUND),
-            ),
+            Paragraph::new(Text::raw(status))
+                .style(Style::default().fg(theme::MUTED).bg(theme::BACKGROUND)),
             chunks[0],
         );
 

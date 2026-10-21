@@ -229,11 +229,7 @@ impl App {
     /// Draw the current frame.
     fn render(&mut self, frame: &mut Frame<'_>) {
         frame.render_widget(
-            Block::default().style(
-                Style::default()
-                    .fg(theme::FOREGROUND)
-                    .bg(theme::BACKGROUND),
-            ),
+            Block::default().style(Style::default().fg(theme::FOREGROUND).bg(theme::BACKGROUND)),
             frame.size(),
         );
 
