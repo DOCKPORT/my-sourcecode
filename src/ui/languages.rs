@@ -1,10 +1,8 @@
 use crate::scan::LanguageRow;
 use crate::ui::format::{average, commas};
 use crate::ui::table::{TableSpec, draw_table};
-use crate::ui::theme;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Rect};
-use ratatui::style::{Color, Style};
 use ratatui::text::Text;
 use ratatui::widgets::{Block, Borders, Paragraph};
 
@@ -37,14 +35,6 @@ impl LanguageSummary {
             .collect()
     }
 
-    /// Every language color, for the overlay.
-    pub fn display_colors(&self) -> Vec<Option<Color>> {
-        self.rows
-            .iter()
-            .map(|row| row.color.as_deref().and_then(theme::language_color))
-            .collect()
-    }
-
     /// Build one formatted table row.
     fn row_cells(&self, index: usize, row: &LanguageRow) -> Vec<String> {
         vec![
@@ -70,14 +60,8 @@ impl LanguageSummary {
             .title(format!(" Languages ({}) ", self.rows.len()));
 
         if self.rows.is_empty() {
-            let message = Paragraph::new(Text::raw("No languages found in this repository."))
-                .style(Style::default().fg(theme::FOREGROUND).bg(theme::BACKGROUND))
-                .block(
-                    block
-                        .style(Style::default().bg(theme::BACKGROUND))
-                        .border_style(Style::default().fg(theme::BORDER))
-                        .title_style(Style::default().fg(theme::FOREGROUND)),
-                );
+            let message =
+                Paragraph::new(Text::raw("No languages found in this repository.")).block(block);
             frame.render_widget(message, area);
             return;
         }
@@ -108,25 +92,20 @@ impl LanguageSummary {
         };
 
         let mut table_rows: Vec<Vec<String>> = Vec::new();
-        let mut cell_colors: Vec<Option<Color>> = Vec::new();
         for (index, row) in self.rows.iter().take(shown).enumerate() {
             if index > 0 {
                 table_rows.push(blank_row());
-                cell_colors.push(None);
             }
             table_rows.push(self.row_cells(index, row));
-            cell_colors.push(row.color.as_deref().and_then(theme::language_color));
         }
 
         if overflow > 0 {
             if shown > 0 {
                 table_rows.push(blank_row());
-                cell_colors.push(None);
             }
             let mut cells = vec![format!("+ {overflow} more languages")];
             cells.extend((0..8).map(|_| String::new()));
             table_rows.push(cells);
-            cell_colors.push(None);
         }
 
         let widths = [
@@ -154,8 +133,6 @@ impl LanguageSummary {
                 left_aligned: centered.to_vec(),
                 row_rules: true,
                 body_dividers: false,
-                color_column: Some(0),
-                cell_colors,
             },
             None,
         );
