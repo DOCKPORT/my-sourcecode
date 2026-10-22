@@ -240,17 +240,11 @@ pub fn stats(root: &Path) -> GitStats {
                 .unwrap_or_else(|| "none".to_string())
         });
 
-        let branch = branch
-            .join()
-            .unwrap_or_else(|_| "none".to_string());
+        let branch = branch.join().unwrap_or_else(|_| "none".to_string());
         let commits = commits.join().unwrap_or(0);
         let (tags, latest_tag) = tags.join().unwrap_or_else(|_| (0, "none".to_string()));
-        let first_commit = first_commit
-            .join()
-            .unwrap_or_else(|_| "none".to_string());
-        let last_commit = last_commit
-            .join()
-            .unwrap_or_else(|_| "none".to_string());
+        let first_commit = first_commit.join().unwrap_or_else(|_| "none".to_string());
+        let last_commit = last_commit.join().unwrap_or_else(|_| "none".to_string());
 
         GitStats {
             branch,

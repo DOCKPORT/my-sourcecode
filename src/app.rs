@@ -1,9 +1,9 @@
 use crate::scan::{self, GitStats, Report, ScanPhase};
 use crate::ui::Action;
-use crate::ui::format::commas;
 use crate::ui::bindings::{self, Command};
 use crate::ui::file_view::FileView;
 use crate::ui::files::FileTable;
+use crate::ui::format::commas;
 use crate::ui::git::GitSummary;
 use crate::ui::language_overlay::LanguageOverlay;
 use crate::ui::languages::LanguageSummary;
@@ -461,10 +461,7 @@ impl App {
     /// The footer text and, while a search term is typed, the cursor column.
     fn footer(&self) -> (String, Option<u16>) {
         if self.scan.is_some() {
-            return (
-                " Scanning repository... | Esc: exit ".to_string(),
-                None,
-            );
+            return (" Scanning repository... | Esc: exit ".to_string(), None);
         }
         if let Some(view) = self.file_view.as_ref() {
             return (
