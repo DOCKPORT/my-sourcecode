@@ -8,17 +8,11 @@ use ratatui::style::{Color, Style};
 use ratatui::text::Text;
 use ratatui::widgets::{Block, Borders, Paragraph};
 
-/// Languages below this share (in tenths of a percent) join the Other row.
-const OTHER_THRESHOLD_TENTHS: u16 = 5;
-
-struct DisplayLanguage {
-    row: LanguageRow,
-    tenths: u16,
-}
-
 /// The read-only language summary shown above the file table.
 pub struct LanguageSummary {
-    display: Vec<DisplayLanguage>,
+    rows: Vec<LanguageRow>,
+    /// Share per language in tenths of a percent. The values sum to 1000.
+    shares: Vec<u16>,
 }
 
 impl LanguageSummary {
@@ -26,75 +20,33 @@ impl LanguageSummary {
     pub fn new(rows: Vec<LanguageRow>) -> Self {
         let total_bytes = rows.iter().map(|row| row.bytes).sum();
         let shares = compute_shares(&rows, total_bytes);
-
-        let mut display = Vec::new();
-        let mut other = LanguageRow {
-            language: "Other".to_string(),
-            files: 0,
-            lines: 0,
-            code: 0,
-            comments: 0,
-            blanks: 0,
-            bytes: 0,
-            color: None,
-        };
-        let mut other_tenths = 0u16;
-        let mut has_other = false;
-
-        for (row, tenths) in rows.into_iter().zip(shares) {
-            if tenths < OTHER_THRESHOLD_TENTHS {
-                has_other = true;
-                other_tenths += tenths;
-                other.files += row.files;
-                other.lines += row.lines;
-                other.code += row.code;
-                other.comments += row.comments;
-                other.blanks += row.blanks;
-                other.bytes += row.bytes;
-            } else {
-                display.push(DisplayLanguage { row, tenths });
-            }
-        }
-
-        if has_other {
-            display.push(DisplayLanguage {
-                row: other,
-                tenths: other_tenths,
-            });
-        }
-
-        Self { display }
+        Self { rows, shares }
     }
 
-    /// Number of rows in the summary.
+    /// Number of languages in the summary.
     pub fn len(&self) -> usize {
-        self.display.len()
+        self.rows.len()
     }
 
     /// Every language as a display row, for the overlay.
     pub fn display_rows(&self) -> Vec<Vec<String>> {
-        self.display
+        self.rows
             .iter()
-            .map(|language| self.row_cells(language.tenths, &language.row))
+            .enumerate()
+            .map(|(index, row)| self.row_cells(index, row))
             .collect()
     }
 
     /// Every language color, for the overlay.
     pub fn display_colors(&self) -> Vec<Option<Color>> {
-        self.display
+        self.rows
             .iter()
-            .map(|language| {
-                language
-                    .row
-                    .color
-                    .as_deref()
-                    .and_then(theme::language_color)
-            })
+            .map(|row| row.color.as_deref().and_then(theme::language_color))
             .collect()
     }
 
     /// Build one formatted table row.
-    fn row_cells(&self, tenths: u16, row: &LanguageRow) -> Vec<String> {
+    fn row_cells(&self, index: usize, row: &LanguageRow) -> Vec<String> {
         vec![
             row.language.clone(),
             commas(row.files),
@@ -103,7 +55,7 @@ impl LanguageSummary {
             commas(row.comments),
             commas(row.blanks),
             commas(row.bytes),
-            share_label(tenths),
+            share_label(self.shares.get(index).copied().unwrap_or(0)),
             average(row.lines, row.files),
         ]
     }
@@ -115,9 +67,9 @@ impl LanguageSummary {
     pub fn draw(&self, frame: &mut Frame<'_>, area: Rect) {
         let block = Block::default()
             .borders(Borders::ALL)
-            .title(format!(" Languages ({}) ", self.display.len()));
+            .title(format!(" Languages ({}) ", self.rows.len()));
 
-        if self.display.is_empty() {
+        if self.rows.is_empty() {
             let message = Paragraph::new(Text::raw("No languages found in this repository."))
                 .style(Style::default().fg(theme::FOREGROUND).bg(theme::BACKGROUND))
                 .block(
@@ -148,28 +100,22 @@ impl LanguageSummary {
         // uses two lines because one blank line sits between entries.
         let body_height = area.height.saturating_sub(4) as usize;
         let max_entries = body_height.div_ceil(2);
-        let overflow = self.display.len().saturating_sub(max_entries);
+        let overflow = self.rows.len().saturating_sub(max_entries);
         let shown = if overflow > 0 {
             max_entries.saturating_sub(1)
         } else {
-            self.display.len()
+            self.rows.len()
         };
 
         let mut table_rows: Vec<Vec<String>> = Vec::new();
         let mut cell_colors: Vec<Option<Color>> = Vec::new();
-        for (index, language) in self.display.iter().take(shown).enumerate() {
+        for (index, row) in self.rows.iter().take(shown).enumerate() {
             if index > 0 {
                 table_rows.push(blank_row());
                 cell_colors.push(None);
             }
-            table_rows.push(self.row_cells(language.tenths, &language.row));
-            cell_colors.push(
-                language
-                    .row
-                    .color
-                    .as_deref()
-                    .and_then(theme::language_color),
-            );
+            table_rows.push(self.row_cells(index, row));
+            cell_colors.push(row.color.as_deref().and_then(theme::language_color));
         }
 
         if overflow > 0 {
