@@ -1,4 +1,7 @@
 use std::cmp::Reverse;
+use std::collections::{BTreeMap, BTreeSet};
+use std::fs::File;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use crate::scan::count::count_files;
@@ -50,10 +53,17 @@ pub fn scan(root: &Path) -> Result<Report, String> {
     let git_stats = git::stats(root);
 
     let filter = LanguageFilter::from_embedded()?;
-    let files: Vec<PathBuf> = git::list_files(root)?
-        .into_iter()
-        .filter(|path| filter.allows(path))
-        .collect();
+    let all_files = git::list_files(root)?;
+    let attributes = git::linguist_attributes(root, &all_files);
+    let mut detected: BTreeMap<PathBuf, String> = BTreeMap::new();
+
+    for path in all_files {
+        if let Some(language) = detect_file(&path, &filter, attributes.get(&path)) {
+            detected.insert(path, language);
+        }
+    }
+
+    let files: Vec<PathBuf> = detected.keys().cloned().collect();
 
     if files.is_empty() {
         return Ok(Report {
@@ -66,51 +76,106 @@ pub fn scan(root: &Path) -> Result<Report, String> {
 
     let languages = count_files(&files);
     let mut file_rows: Vec<FileRow> = Vec::new();
-    let mut language_rows: Vec<LanguageRow> = Vec::new();
+    let mut merged: BTreeMap<String, LanguageRow> = BTreeMap::new();
+    let mut counted: BTreeSet<PathBuf> = BTreeSet::new();
 
     for (language_type, language) in languages.iter() {
-        let language_name = language_type.to_string();
-
-        if !filter.allows_language(&language_name) {
-            continue;
-        }
-
-        let color = filter.color_for(&language_name);
-
-        let mut language_bytes = 0usize;
+        let tokei_name = language_type.to_string();
 
         for report in &language.reports {
+            counted.insert(report.name.clone());
+
+            let language_name = filter.resolve_group(
+                &detected
+                    .get(&report.name)
+                    .map(|name| canonical_language(name))
+                    .unwrap_or_else(|| canonical_language(&tokei_name)),
+            );
+
+            if !filter.allows_language(&language_name) {
+                continue;
+            }
+
+            let color = filter
+                .color_for(&language_name)
+                .or_else(|| filter.color_for(&tokei_name));
+
             // GitHub Linguist measures the language share by file bytes. The
             // file is already in the git file list, so a metadata call is
             // enough. An unreadable file adds no bytes.
             let bytes = std::fs::metadata(&report.name)
                 .map(|metadata| metadata.len() as usize)
                 .unwrap_or(0);
-            language_bytes += bytes;
+
+            let lines = report.stats.lines();
+            let code = report.stats.code;
+            let comments = report.stats.comments;
+            let blanks = report.stats.blanks;
 
             file_rows.push(FileRow {
                 language: language_name.clone(),
                 path: display_path(root, &report.name),
-                lines: report.stats.lines(),
-                code: report.stats.code,
-                comments: report.stats.comments,
-                blanks: report.stats.blanks,
+                lines,
+                code,
+                comments,
+                blanks,
                 color: color.clone(),
             });
-        }
 
-        language_rows.push(LanguageRow {
-            language: language_name,
-            files: language.reports.len(),
-            lines: language.lines(),
-            code: language.code,
-            comments: language.comments,
-            blanks: language.blanks,
-            bytes: language_bytes,
-            color,
-        });
+            merge_row(
+                &mut merged,
+                &language_name,
+                color,
+                1,
+                lines,
+                code,
+                comments,
+                blanks,
+                bytes,
+            );
+        }
     }
 
+    // Linguist can identify files that tokei cannot count, such as configure.ac
+    // or Cap'n Proto. Count those files with a simple line counter so their
+    // bytes still contribute to the language shares.
+    for (path, language) in &detected {
+        if counted.contains(path) {
+            continue;
+        }
+
+        let language_name = filter.resolve_group(&canonical_language(language));
+        if !filter.allows_language(&language_name) {
+            continue;
+        }
+        let Some((lines, code, comments, blanks, bytes)) = fallback_stats(path) else {
+            continue;
+        };
+        let color = filter.color_for(&language_name);
+
+        file_rows.push(FileRow {
+            language: language_name.clone(),
+            path: display_path(root, path),
+            lines,
+            code,
+            comments,
+            blanks,
+            color: color.clone(),
+        });
+        merge_row(
+            &mut merged,
+            &language_name,
+            color,
+            1,
+            lines,
+            code,
+            comments,
+            blanks,
+            bytes,
+        );
+    }
+
+    let mut language_rows: Vec<LanguageRow> = merged.into_values().collect();
     file_rows.sort_by_key(|row| (Reverse(row.code), Reverse(row.lines), row.path.clone()));
     language_rows.sort_by_key(|row| (Reverse(row.bytes), Reverse(row.lines), row.language.clone()));
 
@@ -120,6 +185,269 @@ pub fn scan(root: &Path) -> Result<Report, String> {
         languages: language_rows,
         git: git_stats,
     })
+}
+
+/// Add one file to the language totals.
+#[allow(clippy::too_many_arguments)]
+fn merge_row(
+    merged: &mut BTreeMap<String, LanguageRow>,
+    language: &str,
+    color: Option<String>,
+    files: usize,
+    lines: usize,
+    code: usize,
+    comments: usize,
+    blanks: usize,
+    bytes: usize,
+) {
+    match merged.get_mut(language) {
+        Some(row) => {
+            row.files += files;
+            row.lines += lines;
+            row.code += code;
+            row.comments += comments;
+            row.blanks += blanks;
+            row.bytes += bytes;
+            if row.color.is_none() {
+                row.color = color;
+            }
+        }
+        None => {
+            merged.insert(
+                language.to_string(),
+                LanguageRow {
+                    language: language.to_string(),
+                    files,
+                    lines,
+                    code,
+                    comments,
+                    blanks,
+                    bytes,
+                    color,
+                },
+            );
+        }
+    }
+}
+
+/// Count a file that tokei does not support. Comments use `#` or `//`.
+fn fallback_stats(path: &Path) -> Option<(usize, usize, usize, usize, usize)> {
+    let bytes = std::fs::metadata(path).ok()?.len() as usize;
+    if bytes > 4 * 1024 * 1024 {
+        return None;
+    }
+    let data = std::fs::read(path).ok()?;
+    if data.contains(&0) {
+        return None;
+    }
+    let text = String::from_utf8(data).ok()?;
+
+    let mut lines = 0usize;
+    let mut code = 0usize;
+    let mut comments = 0usize;
+    let mut blanks = 0usize;
+    for line in text.lines() {
+        lines += 1;
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            blanks += 1;
+        } else if trimmed.starts_with('#') || trimmed.starts_with("//") {
+            comments += 1;
+        } else {
+            code += 1;
+        }
+    }
+
+    Some((lines, code, comments, blanks, bytes))
+}
+
+/// Detect the Linguist language for one file. Vendored and generated files are
+/// skipped, and `.gitattributes` overrides always win.
+fn detect_file(
+    path: &Path,
+    filter: &LanguageFilter,
+    attributes: Option<&git::LinguistAttributes>,
+) -> Option<String> {
+    let vendored_override = attributes.and_then(|attributes| attributes.vendored);
+    if vendored_override != Some(false) && linguist::is_vendored(path).unwrap_or(false) {
+        return None;
+    }
+    if let Some(attributes) = attributes
+        && (attributes.generated == Some(true)
+            || attributes.vendored == Some(true)
+            || attributes.documentation == Some(true))
+    {
+        return None;
+    }
+
+    let contents = read_prefix(path);
+    let override_name = attributes.and_then(|attributes| attributes.language.as_deref());
+
+    let mut language = if let Some(name) = override_name {
+        if !filter.allows_language(name) {
+            return None;
+        }
+        name.to_string()
+    } else {
+        // Uppercase `.S` is preprocessed assembly. The Linguist crate matches
+        // the lowercase extension only, so detect it with a temporary `.s` path.
+        let detection_path = if is_uppercase_assembly(path) {
+            path.with_extension("s")
+        } else {
+            path.to_path_buf()
+        };
+        let candidates =
+            linguist::detect_language(&detection_path, contents.as_deref()).ok()?;
+        candidates
+            .into_iter()
+            .map(|language| language.name)
+            .find(|name| filter.allows_language(name))?
+            .to_string()
+    };
+
+    if override_name.is_none() && is_c_header(path) && matches!(language.as_str(), "C" | "C++") {
+        language = if contents.as_deref().map(looks_like_cpp).unwrap_or(false) {
+            "C++".to_string()
+        } else {
+            "C".to_string()
+        };
+    }
+
+    Some(language)
+}
+
+fn is_uppercase_assembly(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension == "S")
+}
+
+fn is_c_header(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("h"))
+}
+
+fn looks_like_cpp(source: &str) -> bool {
+    let cleaned = strip_comments_and_strings(source);
+    const MARKERS: &[&str] = &[
+        "namespace ",
+        "template <",
+        "template<",
+        "class ",
+        "std::",
+        "public:",
+        "private:",
+        "protected:",
+        "constexpr",
+        "noexcept",
+        "using namespace",
+        "friend ",
+        "operator ",
+    ];
+    MARKERS
+        .iter()
+        .any(|marker| contains_token(&cleaned, marker))
+}
+
+/// Find a marker only at a token start. For example, `namespace` must not match
+/// the end of `has_provision_namespace`.
+fn contains_token(source: &str, marker: &str) -> bool {
+    source.match_indices(marker).any(|(index, _)| {
+        source[..index]
+            .chars()
+            .next_back()
+            .is_none_or(|character| !character.is_alphanumeric() && character != '_')
+    })
+}
+
+fn strip_comments_and_strings(source: &str) -> String {
+    #[derive(Clone, Copy)]
+    enum State {
+        Normal,
+        LineComment,
+        BlockComment,
+        String(char),
+        Character(char),
+    }
+
+    let mut output = String::with_capacity(source.len());
+    let mut state = State::Normal;
+    let mut chars = source.chars().peekable();
+
+    while let Some(character) = chars.next() {
+        match state {
+            State::Normal => {
+                if character == '/' && chars.peek() == Some(&'/') {
+                    chars.next();
+                    output.push(' ');
+                    state = State::LineComment;
+                } else if character == '/' && chars.peek() == Some(&'*') {
+                    chars.next();
+                    output.push(' ');
+                    state = State::BlockComment;
+                } else if character == '"' {
+                    output.push(' ');
+                    state = State::String('"');
+                } else if character == '\'' {
+                    output.push(' ');
+                    state = State::Character('\'');
+                } else {
+                    output.push(character);
+                }
+            }
+            State::LineComment => {
+                if character == '\n' {
+                    output.push('\n');
+                    state = State::Normal;
+                }
+            }
+            State::BlockComment => {
+                if character == '*' && chars.peek() == Some(&'/') {
+                    chars.next();
+                    output.push(' ');
+                    state = State::Normal;
+                }
+            }
+            State::String(quote) | State::Character(quote) => {
+                if character == '\\' {
+                    chars.next();
+                } else if character == quote {
+                    output.push(' ');
+                    state = State::Normal;
+                }
+            }
+        }
+    }
+
+    output
+}
+
+/// Read the start of a file as text for Linguist heuristics.
+fn read_prefix(path: &Path) -> Option<String> {
+    let mut file = File::open(path).ok()?;
+    let mut buffer = vec![0u8; 64 * 1024];
+    let read = file.read(&mut buffer).ok()?;
+    buffer.truncate(read);
+    if buffer.contains(&0) {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&buffer).into_owned())
+}
+
+/// Map tokei-only language names to GitHub Linguist names.
+///
+/// Linguist has one C and one C++ entry. Tokei splits header files into their
+/// own languages. Linguist also has no separate JSX, Bash, Zsh, or Fish entries.
+fn canonical_language(name: &str) -> String {
+    match name.to_ascii_lowercase().as_str() {
+        "c header" => "C".to_string(),
+        "c++ header" => "C++".to_string(),
+        "jsx" => "JavaScript".to_string(),
+        "bash" | "zsh" | "fish" => "Shell".to_string(),
+        "gnu style assembly" => "Assembly".to_string(),
+        _ => name.to_string(),
+    }
 }
 
 /// Show a file path relative to the repository root.

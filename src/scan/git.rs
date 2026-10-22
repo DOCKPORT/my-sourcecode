@@ -1,5 +1,7 @@
+use std::collections::HashMap;
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 /// Stop if `root` is not inside a git working tree.
 pub fn verify_repository(root: &Path) -> Result<(), String> {
@@ -47,6 +49,108 @@ pub fn list_files(root: &Path) -> Result<Vec<PathBuf>, String> {
     files.sort();
     files.dedup();
     Ok(files)
+}
+
+/// Linguist attributes for one file, from `.gitattributes`.
+///
+/// A flag is `None` when git reports `unspecified`. A flag is `Some(false)`
+/// when the attribute is unset, for example `-linguist-vendored`.
+#[derive(Debug, Default, Clone)]
+pub struct LinguistAttributes {
+    pub generated: Option<bool>,
+    pub vendored: Option<bool>,
+    pub documentation: Option<bool>,
+    pub language: Option<String>,
+}
+
+/// Read the Linguist attributes for all files in one git call.
+///
+/// A failure returns an empty map, so attribute support never blocks a scan.
+pub fn linguist_attributes(root: &Path, files: &[PathBuf]) -> HashMap<PathBuf, LinguistAttributes> {
+    let mut attributes = HashMap::new();
+    if files.is_empty() {
+        return attributes;
+    }
+
+    let mut child = match Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args([
+            "check-attr",
+            "-z",
+            "--stdin",
+            "linguist-generated",
+            "linguist-vendored",
+            "linguist-documentation",
+            "linguist-language",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(_) => return attributes,
+    };
+
+    let paths: Vec<String> = files
+        .iter()
+        .filter_map(|file| {
+            file.strip_prefix(root)
+                .ok()
+                .map(|relative| relative.to_string_lossy().into_owned())
+        })
+        .collect();
+    let stdin = child.stdin.take();
+    // Write in a thread so a large attribute response cannot block the pipe.
+    let writer = std::thread::spawn(move || {
+        if let Some(mut stdin) = stdin {
+            for path in paths {
+                let _ = stdin.write_all(path.as_bytes());
+                let _ = stdin.write_all(&[0]);
+            }
+        }
+    });
+
+    let Ok(output) = child.wait_with_output() else {
+        let _ = writer.join();
+        return attributes;
+    };
+    let _ = writer.join();
+    if !output.status.success() {
+        return attributes;
+    }
+
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut fields = text.split('\0');
+    while let (Some(path), Some(attribute), Some(value)) =
+        (fields.next(), fields.next(), fields.next())
+    {
+        if path.is_empty() {
+            break;
+        }
+        let entry = attributes.entry(root.join(path)).or_default();
+        match attribute {
+            "linguist-generated" => entry.generated = attribute_flag(value),
+            "linguist-vendored" => entry.vendored = attribute_flag(value),
+            "linguist-documentation" => entry.documentation = attribute_flag(value),
+            "linguist-language"
+                if value != "unspecified" && value != "unset" && !value.is_empty() =>
+            {
+                entry.language = Some(value.to_string());
+            }
+            _ => {}
+        }
+    }
+
+    attributes
+}
+
+fn attribute_flag(value: &str) -> Option<bool> {
+    if value == "unspecified" {
+        None
+    } else {
+        Some(matches!(value, "true" | "set" | "yes"))
+    }
 }
 
 /// Read-only repository information for the Git table.

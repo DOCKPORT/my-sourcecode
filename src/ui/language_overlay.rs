@@ -11,8 +11,8 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph, TableState};
 /// How many rows one page key jumps in the overlay.
 const PAGE_JUMP: isize = 50;
 
-/// A scrollable overlay with every language, including the rows hidden by the
-/// height limit of the summary table.
+/// A scrollable overlay with every summary row, including the rows hidden by
+/// the height limit of the summary table.
 pub struct LanguageOverlay {
     rows: Vec<Vec<String>>,
     colors: Vec<Option<Color>>,
