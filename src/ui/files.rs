@@ -296,8 +296,32 @@ impl FileTable {
         .map(|column| header_label(column, self.sort_col, self.ascending))
         .to_vec();
 
-        let rows: Vec<Vec<String>> = self
-            .visible
+        // Only the visible window is formatted and given to the table. The
+        // full row list stays in memory for sorting, search, and the footer.
+        let row_count = self.visible.len();
+        let window_height = area.height.saturating_sub(4).max(1) as usize;
+        let selected = self
+            .state
+            .selected()
+            .unwrap_or(0)
+            .min(row_count.saturating_sub(1));
+        let current = self.state.offset().min(row_count.saturating_sub(1));
+        let offset = if selected < current {
+            selected
+        } else if selected >= current.saturating_add(window_height) {
+            selected.saturating_add(1).saturating_sub(window_height)
+        } else {
+            current
+        };
+        let end = offset.saturating_add(window_height).min(row_count);
+        *self.state.offset_mut() = offset;
+
+        let mut local_state = TableState::default();
+        if row_count > 0 {
+            local_state.select(Some(selected.saturating_sub(offset)));
+        }
+
+        let rows: Vec<Vec<String>> = self.visible[offset..end]
             .iter()
             .map(|&index| {
                 let row = &self.rows[index];
@@ -334,8 +358,7 @@ impl FileTable {
                 row_rules: false,
                 body_dividers: true,
                 color_column: Some(1),
-                cell_colors: self
-                    .visible
+                cell_colors: self.visible[offset..end]
                     .iter()
                     .map(|&index| {
                         self.rows[index]
@@ -345,7 +368,7 @@ impl FileTable {
                     })
                     .collect(),
             },
-            Some(&mut self.state),
+            Some(&mut local_state),
         );
     }
 }

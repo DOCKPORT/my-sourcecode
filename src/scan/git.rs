@@ -51,6 +51,24 @@ pub fn list_files(root: &Path) -> Result<Vec<PathBuf>, String> {
     Ok(files)
 }
 
+/// Check whether any repository `.gitattributes` file mentions a Linguist
+/// attribute. Without such a rule, `git check-attr` cannot change the scan.
+pub fn has_linguist_attributes(files: &[PathBuf]) -> bool {
+    files
+        .iter()
+        .filter(|path| path.file_name() == Some(std::ffi::OsStr::new(".gitattributes")))
+        .any(|path| {
+            let Ok(data) = std::fs::read(path) else {
+                return false;
+            };
+            let text = String::from_utf8_lossy(&data);
+            text.lines().any(|line| {
+                let line = line.trim_start();
+                !line.is_empty() && !line.starts_with('#') && line.contains("linguist-")
+            })
+        })
+}
+
 /// Linguist attributes for one file, from `.gitattributes`.
 ///
 /// A flag is `None` when git reports `unspecified`. A flag is `Some(false)`
@@ -164,48 +182,85 @@ pub struct GitStats {
     pub last_commit: String,
 }
 
+impl GitStats {
+    /// Neutral values for a failed or unavailable history read.
+    pub fn empty() -> Self {
+        Self {
+            branch: "none".to_string(),
+            commits: 0,
+            tags: 0,
+            latest_tag: "none".to_string(),
+            first_commit: "none".to_string(),
+            last_commit: "none".to_string(),
+        }
+    }
+}
+
 /// Collect the repository information. Missing values fall back to safe text
 /// or zero, so an empty repository still shows a table.
 pub fn stats(root: &Path) -> GitStats {
-    let branch = run_git(root, &["rev-parse", "--abbrev-ref", "HEAD"])
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "none".to_string());
-
-    let commits = run_git(root, &["rev-list", "--count", "HEAD"])
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(0);
-
-    let tag_text = run_git(root, &["tag", "--sort=-creatordate"]).unwrap_or_default();
-    let tags = tag_text.lines().filter(|line| !line.is_empty()).count();
-    let latest_tag = tag_text
-        .lines()
-        .find(|line| !line.is_empty())
-        .unwrap_or("none")
-        .to_string();
-
-    let first_commit = run_git(root, &["log", "--max-parents=0", "--format=%cs", "HEAD"])
-        .and_then(|value| {
-            value
+    // The commands read the same repository, so run them together. Wall time
+    // then follows the slowest command, not the sum of all five.
+    std::thread::scope(|scope| {
+        let branch = scope.spawn(move || {
+            run_git(root, &["rev-parse", "--abbrev-ref", "HEAD"])
+                .filter(|value| !value.is_empty())
+                .unwrap_or_else(|| "none".to_string())
+        });
+        let commits = scope.spawn(move || {
+            run_git(root, &["rev-list", "--count", "HEAD"])
+                .and_then(|value| value.parse::<usize>().ok())
+                .unwrap_or(0)
+        });
+        let tags = scope.spawn(move || {
+            let text = run_git(root, &["tag", "--sort=-creatordate"]).unwrap_or_default();
+            let count = text.lines().filter(|line| !line.is_empty()).count();
+            let latest = text
                 .lines()
                 .find(|line| !line.is_empty())
-                .map(str::to_string)
-        })
-        .map(|value| format_date(&value))
-        .unwrap_or_else(|| "none".to_string());
+                .unwrap_or("none")
+                .to_string();
+            (count, latest)
+        });
+        let first_commit = scope.spawn(move || {
+            run_git(root, &["log", "--max-parents=0", "--format=%cs", "HEAD"])
+                .and_then(|value| {
+                    value
+                        .lines()
+                        .find(|line| !line.is_empty())
+                        .map(str::to_string)
+                })
+                .map(|value| format_date(&value))
+                .unwrap_or_else(|| "none".to_string())
+        });
+        let last_commit = scope.spawn(move || {
+            run_git(root, &["log", "-1", "--format=%cs"])
+                .filter(|value| !value.is_empty())
+                .map(|value| format_date(&value))
+                .unwrap_or_else(|| "none".to_string())
+        });
 
-    let last_commit = run_git(root, &["log", "-1", "--format=%cs"])
-        .filter(|value| !value.is_empty())
-        .map(|value| format_date(&value))
-        .unwrap_or_else(|| "none".to_string());
+        let branch = branch
+            .join()
+            .unwrap_or_else(|_| "none".to_string());
+        let commits = commits.join().unwrap_or(0);
+        let (tags, latest_tag) = tags.join().unwrap_or_else(|_| (0, "none".to_string()));
+        let first_commit = first_commit
+            .join()
+            .unwrap_or_else(|_| "none".to_string());
+        let last_commit = last_commit
+            .join()
+            .unwrap_or_else(|_| "none".to_string());
 
-    GitStats {
-        branch,
-        commits,
-        tags,
-        latest_tag,
-        first_commit,
-        last_commit,
-    }
+        GitStats {
+            branch,
+            commits,
+            tags,
+            latest_tag,
+            first_commit,
+            last_commit,
+        }
+    })
 }
 
 /// Convert a git date from `YYYY-MM-DD` to `MM-DD-YYYY`.

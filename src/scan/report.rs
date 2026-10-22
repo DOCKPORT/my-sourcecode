@@ -1,8 +1,10 @@
 use std::cmp::Reverse;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+
+use rayon::prelude::*;
 
 use crate::scan::count::count_files;
 use crate::scan::filter::LanguageFilter;
@@ -39,29 +41,48 @@ pub struct Report {
     pub files: Vec<FileRow>,
     /// One row per language, sorted by total lines.
     pub languages: Vec<LanguageRow>,
-    /// Read-only repository information for the Git table.
-    pub git: git::GitStats,
+}
+
+/// One stage of a scan, for progress display.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScanPhase {
+    Repository,
+    Files,
+    Detecting(usize),
+    Counting(usize),
+    Finishing,
 }
 
 /// Scan a local git repository: verify it, list its files, filter them through
 /// the embedded language rules, and count the survivors with tokei.
 ///
 /// An empty repository is not an error. The returned report then holds no
-/// rows, and the interface shows the empty state.
-pub fn scan(root: &Path) -> Result<Report, String> {
+/// rows, and the interface shows the empty state. Each stage goes to
+/// `progress` for the loading screen.
+pub fn scan_with_progress<F>(root: &Path, progress: F) -> Result<Report, String>
+where
+    F: Fn(ScanPhase) + Sync,
+{
+    progress(ScanPhase::Repository);
     git::verify_repository(root)?;
-    let git_stats = git::stats(root);
 
     let filter = LanguageFilter::from_embedded()?;
+    progress(ScanPhase::Files);
     let all_files = git::list_files(root)?;
-    let attributes = git::linguist_attributes(root, &all_files);
-    let mut detected: BTreeMap<PathBuf, String> = BTreeMap::new();
+    let attributes = if git::has_linguist_attributes(&all_files) {
+        git::linguist_attributes(root, &all_files)
+    } else {
+        HashMap::new()
+    };
 
-    for path in all_files {
-        if let Some(language) = detect_file(&path, &filter, attributes.get(&path)) {
-            detected.insert(path, language);
-        }
-    }
+    progress(ScanPhase::Detecting(all_files.len()));
+    let detected: BTreeMap<PathBuf, String> = all_files
+        .par_iter()
+        .filter_map(|path| {
+            detect_file(path, &filter, attributes.get(path))
+                .map(|language| (path.clone(), language))
+        })
+        .collect();
 
     let files: Vec<PathBuf> = detected.keys().cloned().collect();
 
@@ -70,10 +91,10 @@ pub fn scan(root: &Path) -> Result<Report, String> {
             root: root.to_path_buf(),
             files: Vec::new(),
             languages: Vec::new(),
-            git: git_stats,
         });
     }
 
+    progress(ScanPhase::Counting(files.len()));
     let languages = count_files(&files);
     let mut file_rows: Vec<FileRow> = Vec::new();
     let mut merged: BTreeMap<String, LanguageRow> = BTreeMap::new();
@@ -175,6 +196,7 @@ pub fn scan(root: &Path) -> Result<Report, String> {
         );
     }
 
+    progress(ScanPhase::Finishing);
     let mut language_rows: Vec<LanguageRow> = merged.into_values().collect();
     file_rows.sort_by_key(|row| (Reverse(row.code), Reverse(row.lines), row.path.clone()));
     language_rows.sort_by_key(|row| (Reverse(row.bytes), Reverse(row.lines), row.language.clone()));
@@ -183,7 +205,6 @@ pub fn scan(root: &Path) -> Result<Report, String> {
         root: root.to_path_buf(),
         files: file_rows,
         languages: language_rows,
-        git: git_stats,
     })
 }
 
@@ -280,31 +301,48 @@ fn detect_file(
         return None;
     }
 
-    let contents = read_prefix(path);
     let override_name = attributes.and_then(|attributes| attributes.language.as_deref());
+    if let Some(name) = override_name {
+        return filter.allows_language(name).then(|| name.to_string());
+    }
 
-    let mut language = if let Some(name) = override_name {
-        if !filter.allows_language(name) {
-            return None;
-        }
-        name.to_string()
+    // Uppercase `.S` is preprocessed assembly. The Linguist crate matches the
+    // lowercase extension only, so detect it with a temporary `.s` path.
+    let detection_path = if is_uppercase_assembly(path) {
+        path.with_extension("s")
     } else {
-        // Uppercase `.S` is preprocessed assembly. The Linguist crate matches
-        // the lowercase extension only, so detect it with a temporary `.s` path.
-        let detection_path = if is_uppercase_assembly(path) {
-            path.with_extension("s")
-        } else {
-            path.to_path_buf()
-        };
-        let candidates = linguist::detect_language(&detection_path, contents.as_deref()).ok()?;
-        candidates
-            .into_iter()
-            .map(|language| language.name)
-            .find(|name| filter.allows_language(name))?
-            .to_string()
+        path.to_path_buf()
     };
 
-    if override_name.is_none() && is_c_header(path) && matches!(language.as_str(), "C" | "C++") {
+    // Most files resolve without content. Read only when the answer stays
+    // ambiguous, when the file is unknown, or for the C header rule.
+    let initial = linguist::detect_language(&detection_path, None).ok()?;
+    if !is_c_header(path) {
+        if initial.len() == 1 {
+            let name = initial[0].name;
+            return filter.allows_language(name).then(|| name.to_string());
+        }
+        if initial.len() > 1
+            && !initial
+                .iter()
+                .any(|language| filter.allows_language(language.name))
+        {
+            return None;
+        }
+    }
+
+    let contents = read_prefix(path);
+    let candidates = match linguist::detect_language(&detection_path, contents.as_deref()) {
+        Ok(candidates) => candidates,
+        Err(_) => initial,
+    };
+    let mut language = candidates
+        .iter()
+        .find(|language| filter.allows_language(language.name))?
+        .name
+        .to_string();
+
+    if is_c_header(path) && matches!(language.as_str(), "C" | "C++") {
         language = if contents.as_deref().map(looks_like_cpp).unwrap_or(false) {
             "C++".to_string()
         } else {

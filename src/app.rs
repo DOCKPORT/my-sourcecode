@@ -1,5 +1,6 @@
-use crate::scan::{self, Report};
+use crate::scan::{self, GitStats, Report, ScanPhase};
 use crate::ui::Action;
+use crate::ui::format::commas;
 use crate::ui::bindings::{self, Command};
 use crate::ui::file_view::FileView;
 use crate::ui::files::FileTable;
@@ -13,11 +14,26 @@ use crate::ui::tui::{self, TuiTerminal};
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use ratatui::Frame;
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::text::Text;
 use ratatui::widgets::{Block, Paragraph};
 use std::path::Path;
+use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::time::{Duration, Instant};
+
+/// A scan that runs on a worker thread.
+struct ScanSession {
+    display: String,
+    phase: ScanPhase,
+    started: Instant,
+    receiver: Receiver<ScanEvent>,
+}
+
+enum ScanEvent {
+    Phase(ScanPhase),
+    Done(Result<Report, String>),
+}
 
 /// The application shell. Before a scan it shows the repository picker; after
 /// a scan it shows the totals, the language summary, and the file table.
@@ -34,10 +50,14 @@ pub struct App {
     languages: Option<LanguageSummary>,
     /// The repository information table of the scanned repository.
     git: Option<GitSummary>,
+    /// The background history read, until its result arrives.
+    git_receiver: Option<Receiver<GitStats>>,
     /// The full language list overlay, while it is open.
     languages_overlay: Option<LanguageOverlay>,
     /// The read-only file viewer, while it is open.
     file_view: Option<FileView>,
+    /// The active background scan, while one runs.
+    scan: Option<ScanSession>,
     should_quit: bool,
 }
 
@@ -51,8 +71,10 @@ impl App {
             files: None,
             languages: None,
             git: None,
+            git_receiver: None,
             languages_overlay: None,
             file_view: None,
+            scan: None,
             should_quit: false,
         }
     }
@@ -72,11 +94,100 @@ impl App {
             }
         };
 
-        match scan::scan(&root) {
-            Ok(report) => self.enter_results(report),
-            Err(error) => self
-                .picker
-                .report(format!("Cannot scan {}: {error}", root.display())),
+        let display = root.display().to_string();
+
+        // History is independent of counting. Start it now and show its table
+        // when the language result is ready.
+        let (git_sender, git_receiver) = mpsc::channel();
+        let git_root = root.clone();
+        std::thread::spawn(move || {
+            let stats = scan::git::stats(&git_root);
+            let _ = git_sender.send(stats);
+        });
+        self.git_receiver = Some(git_receiver);
+
+        let (sender, receiver) = mpsc::channel();
+        std::thread::spawn(move || {
+            let phase_sender = sender.clone();
+            let result = scan::scan_with_progress(&root, |phase| {
+                let _ = phase_sender.send(ScanEvent::Phase(phase));
+            });
+            let _ = sender.send(ScanEvent::Done(result));
+        });
+
+        self.scan = Some(ScanSession {
+            display,
+            phase: ScanPhase::Repository,
+            started: Instant::now(),
+            receiver,
+        });
+    }
+
+    /// Apply finished scan messages. Return whether the screen changed.
+    fn poll_scan(&mut self) -> bool {
+        let mut done = None;
+        let mut changed = false;
+
+        if let Some(scan) = self.scan.as_mut() {
+            loop {
+                match scan.receiver.try_recv() {
+                    Ok(ScanEvent::Phase(phase)) => {
+                        scan.phase = phase;
+                        changed = true;
+                    }
+                    Ok(ScanEvent::Done(result)) => {
+                        done = Some(result);
+                        break;
+                    }
+                    Err(TryRecvError::Empty) => break,
+                    Err(TryRecvError::Disconnected) => {
+                        done = Some(Err("scan worker stopped".to_string()));
+                        break;
+                    }
+                }
+            }
+        }
+
+        if let Some(result) = done {
+            let display = self
+                .scan
+                .take()
+                .map(|scan| scan.display)
+                .unwrap_or_default();
+            match result {
+                Ok(report) => self.enter_results(report),
+                Err(error) => {
+                    self.git_receiver = None;
+                    self.picker
+                        .report(format!("Cannot scan {display}: {error}"));
+                }
+            }
+            changed = true;
+        }
+
+        changed
+    }
+
+    /// Apply a finished Git history read. Return whether the screen changed.
+    fn poll_git(&mut self) -> bool {
+        if self.files.is_none() {
+            return false;
+        }
+        let Some(receiver) = self.git_receiver.as_ref() else {
+            return false;
+        };
+        match receiver.try_recv() {
+            Ok(stats) => {
+                self.git_receiver = None;
+                self.git = Some(GitSummary::new(stats));
+                true
+            }
+            Err(TryRecvError::Empty) => false,
+            Err(TryRecvError::Disconnected) => {
+                self.git_receiver = None;
+                self.git = Some(GitSummary::new(GitStats::empty()));
+                true
+            }
         }
     }
 
@@ -87,7 +198,6 @@ impl App {
             root,
             files,
             languages,
-            git,
         } = report;
         let display = root.display().to_string();
 
@@ -95,7 +205,7 @@ impl App {
         self.summary = Some(summary);
         self.files = Some(FileTable::new(files));
         self.languages = Some(LanguageSummary::new(languages));
-        self.git = Some(GitSummary::new(git));
+        self.git = Some(GitSummary::pending());
         self.languages_overlay = None;
         self.file_view = None;
         self.root = Some(display);
@@ -124,7 +234,23 @@ impl App {
             if needs_redraw {
                 terminal.draw(|frame| self.render(frame))?;
             }
-            needs_redraw = self.handle_events()?;
+            if self.scan.is_some() {
+                needs_redraw = self.poll_scan();
+                needs_redraw |= self.poll_git();
+                if event::poll(Duration::from_millis(100))? {
+                    needs_redraw |= self.handle_events()?;
+                } else {
+                    // Animate the spinner while the worker runs.
+                    needs_redraw = true;
+                }
+            } else if self.git_receiver.is_some() {
+                needs_redraw |= self.poll_git();
+                if event::poll(Duration::from_millis(100))? {
+                    needs_redraw |= self.handle_events()?;
+                }
+            } else {
+                needs_redraw = self.handle_events()?;
+            }
         }
         Ok(())
     }
@@ -143,6 +269,14 @@ impl App {
                     .modifiers
                     .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
                 {
+                    return Ok(false);
+                }
+
+                if self.scan.is_some() {
+                    if key.code == KeyCode::Esc {
+                        self.should_quit = true;
+                        return Ok(true);
+                    }
                     return Ok(false);
                 }
 
@@ -203,6 +337,7 @@ impl App {
                 self.files = None;
                 self.languages = None;
                 self.git = None;
+                self.git_receiver = None;
                 self.languages_overlay = None;
                 self.file_view = None;
             }
@@ -242,14 +377,22 @@ impl App {
             ])
             .split(frame.size());
 
-        let header = match &self.root {
-            Some(root) => format!(
-                " my-sourcecode v{}  {}  {} files",
+        let header = if let Some(scan) = self.scan.as_ref() {
+            format!(
+                " my-sourcecode v{}  {}  scanning",
                 env!("CARGO_PKG_VERSION"),
-                root,
-                self.files.as_ref().map_or(0, FileTable::total)
-            ),
-            None => format!(" My-Sourcecode v{}", env!("CARGO_PKG_VERSION")),
+                scan.display
+            )
+        } else {
+            match &self.root {
+                Some(root) => format!(
+                    " my-sourcecode v{}  {}  {} files",
+                    env!("CARGO_PKG_VERSION"),
+                    root,
+                    self.files.as_ref().map_or(0, FileTable::total)
+                ),
+                None => format!(" My-Sourcecode v{}", env!("CARGO_PKG_VERSION")),
+            }
         };
         frame.render_widget(
             Paragraph::new(Text::raw(header))
@@ -257,7 +400,9 @@ impl App {
             chunks[0],
         );
 
-        if self.files.is_none() {
+        if let Some(scan) = self.scan.as_ref() {
+            draw_scan(frame, chunks[1], scan);
+        } else if self.files.is_none() {
             self.picker.draw(frame, chunks[1]);
         } else if let Some(view) = self.file_view.as_mut() {
             view.draw(frame, chunks[1]);
@@ -315,6 +460,12 @@ impl App {
 
     /// The footer text and, while a search term is typed, the cursor column.
     fn footer(&self) -> (String, Option<u16>) {
+        if self.scan.is_some() {
+            return (
+                " Scanning repository... | Esc: exit ".to_string(),
+                None,
+            );
+        }
         if let Some(view) = self.file_view.as_ref() {
             return (
                 format!(
@@ -354,6 +505,52 @@ impl App {
             ),
             None,
         )
+    }
+}
+
+/// Draw the loading panel for an active scan.
+fn draw_scan(frame: &mut Frame<'_>, area: Rect, scan: &ScanSession) {
+    let frames = ["|", "/", "-", "\\"];
+    let index = (scan.started.elapsed().as_millis() / 120) as usize % frames.len();
+    let message = format!(
+        "{}  Scanning\n\n{}\n\n{}\n\n{} s",
+        frames[index],
+        scan_phase_text(scan.phase),
+        scan.display,
+        scan.started.elapsed().as_secs()
+    );
+    let block = Block::default()
+        .borders(ratatui::widgets::Borders::ALL)
+        .title(" Scanning ")
+        .style(Style::default().bg(theme::BACKGROUND))
+        .border_style(Style::default().fg(theme::BORDER))
+        .title_style(Style::default().fg(theme::FOREGROUND));
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Min(0),
+            Constraint::Length(7),
+            Constraint::Min(0),
+        ])
+        .split(area);
+    frame.render_widget(
+        Paragraph::new(Text::raw(message))
+            .alignment(Alignment::Center)
+            .block(block),
+        rows[1],
+    );
+}
+
+/// Human text for one scan stage.
+fn scan_phase_text(phase: ScanPhase) -> String {
+    match phase {
+        ScanPhase::Repository => "Reading repository information".to_string(),
+        ScanPhase::Files => "Listing files".to_string(),
+        ScanPhase::Detecting(count) => {
+            format!("Detecting languages in {} files", commas(count))
+        }
+        ScanPhase::Counting(count) => format!("Counting lines in {} files", commas(count)),
+        ScanPhase::Finishing => "Building tables".to_string(),
     }
 }
 

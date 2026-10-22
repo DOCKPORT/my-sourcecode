@@ -8,12 +8,24 @@ use ratatui::widgets::{Block, Borders};
 /// The read-only repository information shown under the language summary.
 pub struct GitSummary {
     stats: GitStats,
+    pending: bool,
 }
 
 impl GitSummary {
     /// Build the table from the collected repository information.
     pub fn new(stats: GitStats) -> Self {
-        Self { stats }
+        Self {
+            stats,
+            pending: false,
+        }
+    }
+
+    /// Build a placeholder table while history reads in the background.
+    pub fn pending() -> Self {
+        Self {
+            stats: GitStats::empty(),
+            pending: true,
+        }
     }
 
     /// Draw the Git table into the given area.
@@ -28,18 +40,34 @@ impl GitSummary {
         ]
         .map(str::to_string)
         .to_vec();
-        let row = vec![
-            self.stats.branch.clone(),
-            commas(self.stats.commits),
-            commas(self.stats.tags),
-            self.stats.latest_tag.clone(),
-            self.stats.first_commit.clone(),
-            self.stats.last_commit.clone(),
-        ];
+        let row = if self.pending {
+            vec![
+                "reading...".to_string(),
+                "...".to_string(),
+                "...".to_string(),
+                "...".to_string(),
+                "...".to_string(),
+                "...".to_string(),
+            ]
+        } else {
+            vec![
+                self.stats.branch.clone(),
+                commas(self.stats.commits),
+                commas(self.stats.tags),
+                self.stats.latest_tag.clone(),
+                self.stats.first_commit.clone(),
+                self.stats.last_commit.clone(),
+            ]
+        };
 
         let widths = [Constraint::Ratio(1, 6); 6];
         let centered = [false; 6];
-        let block = Block::default().borders(Borders::ALL).title(" Git ");
+        let title = if self.pending {
+            " Git (reading) "
+        } else {
+            " Git "
+        };
+        let block = Block::default().borders(Borders::ALL).title(title);
 
         draw_table(
             frame,

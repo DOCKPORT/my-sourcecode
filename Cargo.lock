@@ -996,6 +996,7 @@ dependencies = [
  "crossterm",
  "linguist",
  "ratatui",
+ "rayon",
  "serde",
  "serde_json",
  "serde_yaml",
