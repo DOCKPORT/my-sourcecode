@@ -82,11 +82,7 @@ impl LanguageFilter {
     pub fn resolve_group(&self, language: &str) -> String {
         let mut current = language.trim().to_string();
         for _ in 0..8 {
-            let Some(parent) = self
-                .groups
-                .get(&current.to_ascii_lowercase())
-                .cloned()
-            else {
+            let Some(parent) = self.groups.get(&current.to_ascii_lowercase()).cloned() else {
                 break;
             };
             if parent.eq_ignore_ascii_case(&current) {
@@ -103,5 +99,4 @@ impl LanguageFilter {
             .get(&language.trim().to_ascii_lowercase())
             .cloned()
     }
-
 }

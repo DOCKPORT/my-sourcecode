@@ -296,8 +296,7 @@ fn detect_file(
         } else {
             path.to_path_buf()
         };
-        let candidates =
-            linguist::detect_language(&detection_path, contents.as_deref()).ok()?;
+        let candidates = linguist::detect_language(&detection_path, contents.as_deref()).ok()?;
         candidates
             .into_iter()
             .map(|language| language.name)
