@@ -25,7 +25,7 @@
 
 ## How to Run
 
-- Binary releases are currently available only for Linux x86_64 systems.
+- Binary releases will only be available for Linux x86_64 systems.
 - Place the binary in a directory and make it executable.
 - Optionally, create a desktop entry so you can launch it with a click.
 - Alternatively, run it from a terminal in several ways.
