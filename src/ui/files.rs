@@ -79,7 +79,8 @@ pub struct FileTable {
 }
 
 impl FileTable {
-    /// Build the table from the scan rows. The first row starts selected.
+    /// Build the table from rows already in default order: total lines
+    /// descending, then code lines descending. The first row starts selected.
     pub fn new(rows: Vec<FileRow>) -> Self {
         let visible = (0..rows.len()).collect();
         let mut table = Self {
@@ -91,12 +92,7 @@ impl FileTable {
             search: String::new(),
             searching: false,
         };
-        table.apply_sort();
-        table.state.select(if table.visible.is_empty() {
-            None
-        } else {
-            Some(0)
-        });
+        table.select_first();
         table
     }
 
@@ -237,15 +233,15 @@ impl FileTable {
 
     /// Rebuild the visible rows from the search term, then sort them.
     fn apply_filter(&mut self) {
-        let term = self.search.to_ascii_lowercase();
+        let term = self.search.as_str();
         self.visible = self
             .rows
             .iter()
             .enumerate()
             .filter(|(_, row)| {
                 term.is_empty()
-                    || row.path.to_ascii_lowercase().contains(&term)
-                    || row.language.to_ascii_lowercase().contains(&term)
+                    || contains_ascii_case_insensitive(&row.path, term)
+                    || contains_ascii_case_insensitive(&row.language, term)
             })
             .map(|(index, _)| index)
             .collect();
@@ -380,6 +376,23 @@ fn header_label(column: SortColumn, active: SortColumn, ascending: bool) -> Stri
     } else {
         column.label().to_string()
     }
+}
+
+/// Find a substring with ASCII case folding and no lowercase copies.
+fn contains_ascii_case_insensitive(haystack: &str, needle: &str) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+    let needle = needle.as_bytes();
+    haystack
+        .as_bytes()
+        .windows(needle.len())
+        .any(|window| {
+            window
+                .iter()
+                .zip(needle)
+                .all(|(left, right)| left.eq_ignore_ascii_case(right))
+        })
 }
 
 fn compare_rows(left: &FileRow, right: &FileRow, column: SortColumn) -> Ordering {

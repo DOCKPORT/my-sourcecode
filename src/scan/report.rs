@@ -1,4 +1,3 @@
-use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs::File;
 use std::io::Read;
@@ -37,7 +36,7 @@ pub struct LanguageRow {
 pub struct Report {
     /// The repository root that was scanned.
     pub root: PathBuf,
-    /// One row per counted file, sorted by code lines.
+    /// One row per counted file, in the file table default order.
     pub files: Vec<FileRow>,
     /// One row per language, sorted by total lines.
     pub languages: Vec<LanguageRow>,
@@ -79,7 +78,7 @@ where
     let detected: BTreeMap<PathBuf, (String, usize)> = all_files
         .par_iter()
         .filter_map(|file| {
-            detect_file(&file.path, &filter, attributes.get(&file.path)).map(|language| {
+            detect_file(&file.path, filter, attributes.get(&file.path)).map(|language| {
                 (file.path.clone(), (language, file.size))
             })
         })
@@ -198,8 +197,20 @@ where
 
     progress(ScanPhase::Finishing);
     let mut language_rows: Vec<LanguageRow> = merged.into_values().collect();
-    file_rows.sort_by_key(|row| (Reverse(row.code), Reverse(row.lines), row.path.clone()));
-    language_rows.sort_by_key(|row| (Reverse(row.bytes), Reverse(row.lines), row.language.clone()));
+    file_rows.sort_by(|left, right| {
+        right
+            .lines
+            .cmp(&left.lines)
+            .then_with(|| right.code.cmp(&left.code))
+            .then_with(|| left.path.cmp(&right.path))
+    });
+    language_rows.sort_by(|left, right| {
+        right
+            .bytes
+            .cmp(&left.bytes)
+            .then_with(|| right.lines.cmp(&left.lines))
+            .then_with(|| left.language.cmp(&right.language))
+    });
 
     Ok(Report {
         root: root.to_path_buf(),

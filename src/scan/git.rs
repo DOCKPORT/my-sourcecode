@@ -38,7 +38,7 @@ pub fn list_files(root: &Path) -> Result<Vec<FileEntry>, String> {
     let output = Command::new("git")
         .arg("-C")
         .arg(root)
-        .args(["ls-files", "--cached", "--others", "--exclude-standard"])
+        .args(["ls-files", "-z", "--cached", "--others", "--exclude-standard"])
         .output()
         .map_err(|error| format!("cannot run git: {error}"))?;
 
@@ -47,12 +47,11 @@ pub fn list_files(root: &Path) -> Result<Vec<FileEntry>, String> {
         return Err(format!("git ls-files failed: {}", message.trim()));
     }
 
-    let text = String::from_utf8_lossy(&output.stdout);
-    let paths: Vec<PathBuf> = text
-        .lines()
-        .map(str::trim_end)
-        .filter(|line| !line.is_empty())
-        .map(|line| root.join(line))
+    let paths: Vec<PathBuf> = output
+        .stdout
+        .split(|byte| *byte == 0)
+        .filter(|entry| !entry.is_empty())
+        .map(|entry| root.join(String::from_utf8_lossy(entry).as_ref()))
         .collect();
 
     let mut files: Vec<FileEntry> = paths

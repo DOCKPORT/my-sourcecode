@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::sync::OnceLock;
 
 use serde::Deserialize;
 
@@ -23,9 +24,13 @@ pub struct LanguageFilter {
 }
 
 impl LanguageFilter {
-    /// Load the embedded policy file.
-    pub fn from_embedded() -> Result<Self, String> {
-        Self::from_yaml(LANGUAGES_YAML)
+    /// Load the embedded policy file once and share the result.
+    pub fn from_embedded() -> Result<&'static Self, String> {
+        static FILTER: OnceLock<Result<LanguageFilter, String>> = OnceLock::new();
+        FILTER
+            .get_or_init(|| Self::from_yaml(LANGUAGES_YAML))
+            .as_ref()
+            .map_err(Clone::clone)
     }
 
     fn from_yaml(source: &str) -> Result<Self, String> {

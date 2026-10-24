@@ -19,13 +19,24 @@ pub struct Summary {
 impl Summary {
     /// Total the file rows and count the languages.
     pub fn new(files: &[FileRow], languages: &[LanguageRow]) -> Self {
+        let mut lines = 0usize;
+        let mut code = 0usize;
+        let mut comments = 0usize;
+        let mut blanks = 0usize;
+        for row in files {
+            lines += row.lines;
+            code += row.code;
+            comments += row.comments;
+            blanks += row.blanks;
+        }
+
         Self {
             files: files.len(),
             languages: languages.len(),
-            lines: files.iter().map(|row| row.lines).sum(),
-            code: files.iter().map(|row| row.code).sum(),
-            comments: files.iter().map(|row| row.comments).sum(),
-            blanks: files.iter().map(|row| row.blanks).sum(),
+            lines,
+            code,
+            comments,
+            blanks,
             bytes: languages.iter().map(|row| row.bytes).sum(),
         }
     }

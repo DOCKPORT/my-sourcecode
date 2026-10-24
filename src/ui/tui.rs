@@ -22,27 +22,62 @@ pub type TuiTerminal = Terminal<Backend>;
 pub fn init() -> Result<TuiTerminal> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
+    if let Err(error) = execute!(stdout, EnterAlternateScreen) {
+        reset_terminal();
+        return Err(error.into());
+    }
     // Ask the terminal to report modified keys (for example Shift) precisely.
     // Terminals that support this report Shift+Left/Right; terminals that do
     // not ignore the request, so the app never relies on it for sorting.
-    execute!(
+    if let Err(error) = execute!(
         stdout,
         PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
-    )?;
+    ) {
+        reset_terminal();
+        return Err(error.into());
+    }
     let backend = CrosstermBackend::new(stdout);
-    let terminal = Terminal::new(backend)?;
-    Ok(terminal)
+    match Terminal::new(backend) {
+        Ok(terminal) => Ok(terminal),
+        Err(error) => {
+            reset_terminal();
+            Err(error.into())
+        }
+    }
+}
+
+/// Undo terminal setup after a failed start. Each step runs even if an earlier
+/// one fails, so the user's terminal is not left in raw or alternate mode.
+fn reset_terminal() {
+    let mut stdout = io::stdout();
+    let _ = execute!(stdout, PopKeyboardEnhancementFlags);
+    let _ = execute!(stdout, LeaveAlternateScreen);
+    let _ = disable_raw_mode();
 }
 
 /// Leave the alternate screen and restore normal terminal behaviour.
 pub fn restore(mut terminal: TuiTerminal) -> Result<()> {
-    execute!(
-        terminal.backend_mut(),
-        PopKeyboardEnhancementFlags,
-        LeaveAlternateScreen
-    )?;
-    disable_raw_mode()?;
-    terminal.show_cursor()?;
-    Ok(())
+    let mut first_error: Option<anyhow::Error> = None;
+    if let Err(error) = execute!(terminal.backend_mut(), PopKeyboardEnhancementFlags) {
+        first_error = Some(error.into());
+    }
+    if let Err(error) = execute!(terminal.backend_mut(), LeaveAlternateScreen)
+        && first_error.is_none()
+    {
+        first_error = Some(error.into());
+    }
+    if let Err(error) = disable_raw_mode()
+        && first_error.is_none()
+    {
+        first_error = Some(error.into());
+    }
+    if let Err(error) = terminal.show_cursor()
+        && first_error.is_none()
+    {
+        first_error = Some(error.into());
+    }
+    match first_error {
+        Some(error) => Err(error),
+        None => Ok(()),
+    }
 }
