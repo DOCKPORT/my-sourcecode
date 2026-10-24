@@ -6,33 +6,25 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use std::fs::File;
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
 use std::sync::OnceLock;
 use syntect::easy::HighlightLines;
 use syntect::highlighting::{FontStyle, Theme, ThemeSet};
-use syntect::parsing::SyntaxSet;
+use syntect::parsing::{SyntaxReference, SyntaxSet};
 
-/// Maximum file size the viewer loads.
-const MAX_BYTES: u64 = 1024 * 1024;
 /// The color theme used for syntax highlighting.
 const THEME_NAME: &str = "base16-eighties.dark";
-
-/// One styled part of a source line.
-#[derive(Clone)]
-struct Segment {
-    style: Style,
-    text: String,
-}
 
 /// A read-only view of one file with line numbers and lazy syntax highlighting.
 pub struct FileView {
     path: String,
-    lines: Vec<String>,
-    /// Cached highlights. None means the line has not been parsed yet.
-    segments: Vec<Option<Vec<Segment>>>,
-    highlighter: Option<HighlightLines<'static>>,
-    /// Index of the next line to parse. All earlier lines are cached.
-    highlighted_until: usize,
+    file: Option<File>,
+    /// Byte offset of each line start.
+    offsets: Vec<usize>,
+    file_len: usize,
+    syntax: Option<&'static SyntaxReference>,
     message: Option<String>,
     offset: usize,
     viewport: usize,
@@ -48,59 +40,75 @@ impl FileView {
         let full = root.join(relative);
         let mut view = Self {
             path: relative.to_string(),
-            lines: Vec::new(),
-            segments: Vec::new(),
-            highlighter: None,
-            highlighted_until: 0,
+            file: None,
+            offsets: Vec::new(),
+            file_len: 0,
+            syntax: find_syntax(language, relative),
             message: None,
             offset: 0,
             viewport: 1,
         };
 
-        let metadata = match std::fs::metadata(&full) {
-            Ok(metadata) => metadata,
+        let file = match File::open(&full) {
+            Ok(file) => file,
             Err(error) => {
                 view.message = Some(format!("Cannot open {}: {error}", full.display()));
                 return view;
             }
         };
-
-        if metadata.len() > MAX_BYTES {
-            view.message = Some(format!(
-                "File is too large to view: {} bytes. The limit is 1 MiB.",
-                metadata.len()
-            ));
-            return view;
-        }
-
-        let bytes = match std::fs::read(&full) {
-            Ok(bytes) => bytes,
+        let metadata = match file.metadata() {
+            Ok(metadata) => metadata,
             Err(error) => {
                 view.message = Some(format!("Cannot read {}: {error}", full.display()));
                 return view;
             }
         };
-
-        if bytes.contains(&0) {
-            view.message = Some("Cannot show a binary file.".to_string());
+        if !metadata.is_file() {
+            view.message = Some("Cannot view a directory.".to_string());
             return view;
         }
 
-        let text = match String::from_utf8(bytes) {
-            Ok(text) => text,
-            Err(_) => {
-                view.message = Some("Cannot show a file that is not valid UTF-8.".to_string());
-                return view;
-            }
-        };
+        view.file_len = metadata.len() as usize;
+        let mut reader = BufReader::new(file);
+        let mut offsets = vec![0usize];
+        let mut position = 0usize;
+        let mut line = Vec::new();
 
-        view.lines = text.lines().map(expand_tabs).collect();
-        if view.lines.is_empty() {
-            view.lines.push(String::new());
+        loop {
+            line.clear();
+            match reader.read_until(b'\n', &mut line) {
+                Ok(0) => break,
+                Ok(read) => {
+                    if line.contains(&0) {
+                        view.message = Some("Cannot show a binary file.".to_string());
+                        return view;
+                    }
+                    if std::str::from_utf8(&line).is_err() {
+                        view.message =
+                            Some("Cannot show a file that is not valid UTF-8.".to_string());
+                        return view;
+                    }
+                    position = position.saturating_add(read);
+                    if line.last() == Some(&b'\n') {
+                        offsets.push(position);
+                    }
+                }
+                Err(error) => {
+                    view.message = Some(format!("Cannot read {}: {error}", full.display()));
+                    return view;
+                }
+            }
         }
-        view.segments = vec![None; view.lines.len()];
-        view.highlighter =
-            find_syntax(language, relative).map(|syntax| HighlightLines::new(syntax, theme()));
+
+        if position > 0 && offsets.last() == Some(&position) {
+            offsets.pop();
+        }
+        if offsets.is_empty() {
+            offsets.push(0);
+        }
+
+        view.offsets = offsets;
+        view.file = Some(reader.into_inner());
         view
     }
 
@@ -109,9 +117,9 @@ impl FileView {
         &self.path
     }
 
-    /// Number of loaded lines.
+    /// Number of lines in the file.
     pub fn len(&self) -> usize {
-        self.lines.len()
+        self.offsets.len()
     }
 
     /// One-based index of the top visible line.
@@ -153,46 +161,46 @@ impl FileView {
     }
 
     fn scroll_to(&mut self, offset: usize) {
-        let max = self.lines.len().saturating_sub(self.viewport.max(1));
+        let max = self.offsets.len().saturating_sub(self.viewport.max(1));
         self.offset = offset.min(max);
     }
 
-    /// Parse lines until `end` lines are cached. Parsing must run in order,
-    /// because syntect keeps state between lines.
-    fn highlight_until(&mut self, end: usize) {
-        let Some(highlighter) = self.highlighter.as_mut() else {
-            return;
-        };
-        let syntax_set = syntax_set();
-        let end = end.min(self.lines.len());
-
-        while self.highlighted_until < end {
-            let index = self.highlighted_until;
-            let mut source = String::with_capacity(self.lines[index].len() + 1);
-            source.push_str(&self.lines[index]);
-            source.push('\n');
-
-            let segments = match highlighter.highlight_line(&source, syntax_set) {
-                Ok(ranges) => ranges
-                    .into_iter()
-                    .filter_map(|(style, text)| {
-                        let text = text.trim_end_matches(['\n', '\r']);
-                        if text.is_empty() {
-                            None
-                        } else {
-                            Some(Segment {
-                                style: convert_style(style),
-                                text: text.to_string(),
-                            })
-                        }
-                    })
-                    .collect(),
-                Err(_) => Vec::new(),
-            };
-
-            self.segments[index] = Some(segments);
-            self.highlighted_until += 1;
+    /// Read one range of whole lines from the file.
+    fn read_window(&mut self, start: usize, end: usize) -> Result<Vec<String>, String> {
+        if start >= end {
+            return Ok(Vec::new());
         }
+        let start_byte = self.offsets[start];
+        let end_byte = if end < self.offsets.len() {
+            self.offsets[end]
+        } else {
+            self.file_len
+        };
+        if end_byte < start_byte {
+            return Err("The file changed while it was open.".to_string());
+        }
+
+        let Some(file) = self.file.as_mut() else {
+            return Err("The file is not available.".to_string());
+        };
+        let mut bytes = vec![0u8; end_byte - start_byte];
+        file.seek(SeekFrom::Start(start_byte as u64))
+            .map_err(|error| format!("Cannot read {}: {error}", self.path))?;
+        file.read_exact(&mut bytes)
+            .map_err(|error| format!("Cannot read {}: {error}", self.path))?;
+        let text = String::from_utf8(bytes)
+            .map_err(|_| "The file is not valid UTF-8.".to_string())?;
+
+        let expected = end - start;
+        let mut lines: Vec<String> = text
+            .split('\n')
+            .map(|line| expand_tabs(line.trim_end_matches('\r')))
+            .collect();
+        if text.ends_with('\n') {
+            lines.pop();
+        }
+        lines.resize(expected, String::new());
+        Ok(lines)
     }
 
     /// Draw the viewer into the given area.
@@ -208,37 +216,55 @@ impl FileView {
 
         self.viewport = inner.height.max(1) as usize;
         self.scroll_to(self.offset);
-        self.highlight_until(self.offset.saturating_add(self.viewport));
 
         if let Some(message) = &self.message {
-            let paragraph = Paragraph::new(Text::raw(message.clone()))
-                .style(Style::default().fg(theme::FOREGROUND).bg(theme::BACKGROUND))
-                .wrap(Wrap { trim: false });
-            frame.render_widget(paragraph, inner);
+            render_message(frame, inner, message);
             return;
         }
 
-        let number_width = self.lines.len().to_string().len();
+        let number_width = self.offsets.len().to_string().len();
         let end = self
             .offset
             .saturating_add(inner.height as usize)
-            .min(self.lines.len());
-        let visible: Vec<Line> = (self.offset..end)
-            .map(|index| {
+            .min(self.offsets.len());
+        let lines = match self.read_window(self.offset, end) {
+            Ok(lines) => lines,
+            Err(error) => {
+                self.message = Some(error.clone());
+                render_message(frame, inner, &error);
+                return;
+            }
+        };
+
+        let syntax_set = syntax_set();
+        let mut highlighter = self.syntax.map(|syntax| HighlightLines::new(syntax, theme()));
+        let visible: Vec<Line> = lines
+            .into_iter()
+            .enumerate()
+            .map(|(index, text)| {
                 let mut spans = vec![
                     Span::styled(
-                        format!("{:>number_width$}", index + 1),
+                        format!("{:>number_width$}", self.offset + index + 1),
                         Style::default().fg(theme::MUTED),
                     ),
                     Span::raw(" │ "),
                 ];
-                match self.segments.get(index).and_then(|line| line.as_ref()) {
-                    Some(segments) => {
-                        for segment in segments {
-                            spans.push(Span::styled(segment.text.clone(), segment.style));
+                let start = spans.len();
+                if let Some(highlighter) = highlighter.as_mut() {
+                    let mut source = String::with_capacity(text.len() + 1);
+                    source.push_str(&text);
+                    source.push('\n');
+                    if let Ok(ranges) = highlighter.highlight_line(&source, syntax_set) {
+                        for (style, part) in ranges {
+                            let part = part.trim_end_matches(['\n', '\r']);
+                            if !part.is_empty() {
+                                spans.push(Span::styled(part.to_string(), convert_style(style)));
+                            }
                         }
                     }
-                    None => spans.push(Span::raw(self.lines[index].clone())),
+                }
+                if spans.len() == start {
+                    spans.push(Span::raw(text));
                 }
                 Line::from(spans)
             })
@@ -250,6 +276,14 @@ impl FileView {
             inner,
         );
     }
+}
+
+/// Draw a plain message inside the viewer.
+fn render_message(frame: &mut Frame<'_>, area: Rect, message: &str) {
+    let paragraph = Paragraph::new(Text::raw(message.to_string()))
+        .style(Style::default().fg(theme::FOREGROUND).bg(theme::BACKGROUND))
+        .wrap(Wrap { trim: false });
+    frame.render_widget(paragraph, area);
 }
 
 fn find_syntax(language: &str, path: &str) -> Option<&'static syntect::parsing::SyntaxReference> {
