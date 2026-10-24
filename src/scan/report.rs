@@ -78,9 +78,8 @@ where
     let detected: BTreeMap<PathBuf, (String, usize)> = all_files
         .par_iter()
         .filter_map(|file| {
-            detect_file(&file.path, filter, attributes.get(&file.path)).map(|language| {
-                (file.path.clone(), (language, file.size))
-            })
+            detect_file(&file.path, filter, attributes.get(&file.path))
+                .map(|language| (file.path.clone(), (language, file.size)))
         })
         .collect();
 
@@ -123,9 +122,7 @@ where
 
             // GitHub Linguist measures the language share by file bytes. The
             // size comes from the one file-inventory pass.
-            let bytes = detected
-                .get(&report.name)
-                .map_or(0, |(_, size)| *size);
+            let bytes = detected.get(&report.name).map_or(0, |(_, size)| *size);
 
             let lines = report.stats.lines();
             let code = report.stats.code;

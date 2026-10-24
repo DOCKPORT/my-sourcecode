@@ -384,15 +384,12 @@ fn contains_ascii_case_insensitive(haystack: &str, needle: &str) -> bool {
         return true;
     }
     let needle = needle.as_bytes();
-    haystack
-        .as_bytes()
-        .windows(needle.len())
-        .any(|window| {
-            window
-                .iter()
-                .zip(needle)
-                .all(|(left, right)| left.eq_ignore_ascii_case(right))
-        })
+    haystack.as_bytes().windows(needle.len()).any(|window| {
+        window
+            .iter()
+            .zip(needle)
+            .all(|(left, right)| left.eq_ignore_ascii_case(right))
+    })
 }
 
 fn compare_rows(left: &FileRow, right: &FileRow, column: SortColumn) -> Ordering {

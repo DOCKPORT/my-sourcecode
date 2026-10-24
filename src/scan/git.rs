@@ -38,7 +38,13 @@ pub fn list_files(root: &Path) -> Result<Vec<FileEntry>, String> {
     let output = Command::new("git")
         .arg("-C")
         .arg(root)
-        .args(["ls-files", "-z", "--cached", "--others", "--exclude-standard"])
+        .args([
+            "ls-files",
+            "-z",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+        ])
         .output()
         .map_err(|error| format!("cannot run git: {error}"))?;
 
@@ -106,7 +112,10 @@ pub struct LinguistAttributes {
 /// Read the Linguist attributes for all files in one git call.
 ///
 /// A failure returns an empty map, so attribute support never blocks a scan.
-pub fn linguist_attributes(root: &Path, files: &[FileEntry]) -> HashMap<PathBuf, LinguistAttributes> {
+pub fn linguist_attributes(
+    root: &Path,
+    files: &[FileEntry],
+) -> HashMap<PathBuf, LinguistAttributes> {
     let mut attributes = HashMap::new();
     if files.is_empty() {
         return attributes;

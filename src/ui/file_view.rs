@@ -188,8 +188,8 @@ impl FileView {
             .map_err(|error| format!("Cannot read {}: {error}", self.path))?;
         file.read_exact(&mut bytes)
             .map_err(|error| format!("Cannot read {}: {error}", self.path))?;
-        let text = String::from_utf8(bytes)
-            .map_err(|_| "The file is not valid UTF-8.".to_string())?;
+        let text =
+            String::from_utf8(bytes).map_err(|_| "The file is not valid UTF-8.".to_string())?;
 
         let expected = end - start;
         let mut lines: Vec<String> = text
@@ -237,7 +237,9 @@ impl FileView {
         };
 
         let syntax_set = syntax_set();
-        let mut highlighter = self.syntax.map(|syntax| HighlightLines::new(syntax, theme()));
+        let mut highlighter = self
+            .syntax
+            .map(|syntax| HighlightLines::new(syntax, theme()));
         let visible: Vec<Line> = lines
             .into_iter()
             .enumerate()
