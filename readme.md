@@ -1,4 +1,3 @@
-`Repository in early stages of development.`
 
 ## Repo Overview
 
@@ -23,12 +22,20 @@
 | Statistics library | tokei |
 | Syntax parser | syntect |
 
+
 ## How to Run
 
-- Binary releases will only be available for Linux x86_64 systems.
+- Binary releases available for Linux x86_64 systems.
 - Place the binary in a directory and make it executable.
 - Optionally, create a desktop entry so you can launch it with a click.
 - Alternatively, run it from a terminal in several ways.
+
+
+## Preview
+
+![my-sourcecode](preview/a.png)
+![my-sourcecode](preview/b.png)
+![my-sourcecode](preview/c.png)
 
 
 
