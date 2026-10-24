@@ -76,11 +76,12 @@ where
     };
 
     progress(ScanPhase::Detecting(all_files.len()));
-    let detected: BTreeMap<PathBuf, String> = all_files
+    let detected: BTreeMap<PathBuf, (String, usize)> = all_files
         .par_iter()
-        .filter_map(|path| {
-            detect_file(path, &filter, attributes.get(path))
-                .map(|language| (path.clone(), language))
+        .filter_map(|file| {
+            detect_file(&file.path, &filter, attributes.get(&file.path)).map(|language| {
+                (file.path.clone(), (language, file.size))
+            })
         })
         .collect();
 
@@ -109,7 +110,7 @@ where
             let language_name = filter.resolve_group(
                 &detected
                     .get(&report.name)
-                    .map(|name| canonical_language(name))
+                    .map(|(name, _)| canonical_language(name))
                     .unwrap_or_else(|| canonical_language(&tokei_name)),
             );
 
@@ -122,11 +123,10 @@ where
                 .or_else(|| filter.color_for(&tokei_name));
 
             // GitHub Linguist measures the language share by file bytes. The
-            // file is already in the git file list, so a metadata call is
-            // enough. An unreadable file adds no bytes.
-            let bytes = std::fs::metadata(&report.name)
-                .map(|metadata| metadata.len() as usize)
-                .unwrap_or(0);
+            // size comes from the one file-inventory pass.
+            let bytes = detected
+                .get(&report.name)
+                .map_or(0, |(_, size)| *size);
 
             let lines = report.stats.lines();
             let code = report.stats.code;
@@ -160,7 +160,7 @@ where
     // Linguist can identify files that tokei cannot count, such as configure.ac
     // or Cap'n Proto. Count those files with a simple line counter so their
     // bytes still contribute to the language shares.
-    for (path, language) in &detected {
+    for (path, (language, size)) in &detected {
         if counted.contains(path) {
             continue;
         }
@@ -169,7 +169,7 @@ where
         if !filter.allows_language(&language_name) {
             continue;
         }
-        let Some((lines, code, comments, blanks, bytes)) = fallback_stats(path) else {
+        let Some((lines, code, comments, blanks)) = fallback_stats(path, *size) else {
             continue;
         };
         let color = filter.color_for(&language_name);
@@ -192,7 +192,7 @@ where
             code,
             comments,
             blanks,
-            bytes,
+            *size,
         );
     }
 
@@ -252,8 +252,7 @@ fn merge_row(
 }
 
 /// Count a file that tokei does not support. Comments use `#` or `//`.
-fn fallback_stats(path: &Path) -> Option<(usize, usize, usize, usize, usize)> {
-    let bytes = std::fs::metadata(path).ok()?.len() as usize;
+fn fallback_stats(path: &Path, bytes: usize) -> Option<(usize, usize, usize, usize)> {
     if bytes > 4 * 1024 * 1024 {
         return None;
     }
@@ -279,7 +278,7 @@ fn fallback_stats(path: &Path) -> Option<(usize, usize, usize, usize, usize)> {
         }
     }
 
-    Some((lines, code, comments, blanks, bytes))
+    Some((lines, code, comments, blanks))
 }
 
 /// Detect the Linguist language for one file. Vendored and generated files are

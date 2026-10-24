@@ -3,6 +3,8 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+use rayon::prelude::*;
+
 /// Stop if `root` is not inside a git working tree.
 pub fn verify_repository(root: &Path) -> Result<(), String> {
     let output = Command::new("git")
@@ -19,12 +21,20 @@ pub fn verify_repository(root: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// One real file and its size at scan time.
+#[derive(Debug, Clone)]
+pub struct FileEntry {
+    pub path: PathBuf,
+    pub size: usize,
+}
+
 /// List tracked files and untracked files that git does not ignore.
 ///
 /// `git ls-files` applies the repository `.gitignore` rules, so the file list
 /// is already limited to files the repository owns. Entries that are not real
 /// files, such as deleted index entries and submodule gitlinks, are dropped.
-pub fn list_files(root: &Path) -> Result<Vec<PathBuf>, String> {
+/// The size comes from the same metadata call that checks the file type.
+pub fn list_files(root: &Path) -> Result<Vec<FileEntry>, String> {
     let output = Command::new("git")
         .arg("-C")
         .arg(root)
@@ -38,27 +48,40 @@ pub fn list_files(root: &Path) -> Result<Vec<PathBuf>, String> {
     }
 
     let text = String::from_utf8_lossy(&output.stdout);
-    let mut files: Vec<PathBuf> = text
+    let paths: Vec<PathBuf> = text
         .lines()
         .map(str::trim_end)
         .filter(|line| !line.is_empty())
         .map(|line| root.join(line))
-        .filter(|path| path.is_file())
         .collect();
 
-    files.sort();
-    files.dedup();
+    let mut files: Vec<FileEntry> = paths
+        .into_par_iter()
+        .filter_map(|path| {
+            let metadata = std::fs::metadata(&path).ok()?;
+            if !metadata.is_file() {
+                return None;
+            }
+            Some(FileEntry {
+                path,
+                size: metadata.len() as usize,
+            })
+        })
+        .collect();
+
+    files.sort_by(|left, right| left.path.cmp(&right.path));
+    files.dedup_by(|left, right| left.path == right.path);
     Ok(files)
 }
 
 /// Check whether any repository `.gitattributes` file mentions a Linguist
 /// attribute. Without such a rule, `git check-attr` cannot change the scan.
-pub fn has_linguist_attributes(files: &[PathBuf]) -> bool {
+pub fn has_linguist_attributes(files: &[FileEntry]) -> bool {
     files
         .iter()
-        .filter(|path| path.file_name() == Some(std::ffi::OsStr::new(".gitattributes")))
-        .any(|path| {
-            let Ok(data) = std::fs::read(path) else {
+        .filter(|file| file.path.file_name() == Some(std::ffi::OsStr::new(".gitattributes")))
+        .any(|file| {
+            let Ok(data) = std::fs::read(&file.path) else {
                 return false;
             };
             let text = String::from_utf8_lossy(&data);
@@ -84,7 +107,7 @@ pub struct LinguistAttributes {
 /// Read the Linguist attributes for all files in one git call.
 ///
 /// A failure returns an empty map, so attribute support never blocks a scan.
-pub fn linguist_attributes(root: &Path, files: &[PathBuf]) -> HashMap<PathBuf, LinguistAttributes> {
+pub fn linguist_attributes(root: &Path, files: &[FileEntry]) -> HashMap<PathBuf, LinguistAttributes> {
     let mut attributes = HashMap::new();
     if files.is_empty() {
         return attributes;
@@ -113,7 +136,8 @@ pub fn linguist_attributes(root: &Path, files: &[PathBuf]) -> HashMap<PathBuf, L
     let paths: Vec<String> = files
         .iter()
         .filter_map(|file| {
-            file.strip_prefix(root)
+            file.path
+                .strip_prefix(root)
                 .ok()
                 .map(|relative| relative.to_string_lossy().into_owned())
         })

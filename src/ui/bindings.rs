@@ -38,7 +38,7 @@ pub enum Command {
 
 /// Map a key to a [`Command`]. Keys not listed do nothing.
 ///
-/// `Esc` is the single exit key. Plain arrows move and confirm. Holding Shift
+/// `Esc` is the single exit key. Arrows move and Enter confirms. Holding Shift
 /// with Left/Right picks the sort column. `Space` toggles the sort direction on
 /// the chosen column.
 pub fn command_for_key(code: KeyCode, mods: KeyModifiers) -> Option<Command> {
@@ -49,7 +49,7 @@ pub fn command_for_key(code: KeyCode, mods: KeyModifiers) -> Option<Command> {
     match (code, shifted) {
         (KeyCode::Up, _) => Some(Command::MoveUp),
         (KeyCode::Down, _) => Some(Command::MoveDown),
-        (KeyCode::Right, false) => Some(Command::Open),
+        (KeyCode::Enter, _) => Some(Command::Open),
         (KeyCode::Left, false) => Some(Command::Back),
         (KeyCode::Left, true) => Some(Command::SortColumnLeft),
         (KeyCode::Right, true) => Some(Command::SortColumnRight),
@@ -140,5 +140,5 @@ pub fn help_for_overlay() -> &'static str {
 
 /// Help text for the file table.
 pub fn help_for_files() -> &'static str {
-    "↑/↓: scroll | →: view file | PgUp/PgDn: 50 | Shift+←/→: sort | Space: direction | s: search | L: all languages | ←: home | Esc: exit"
+    "↑/↓: scroll | Enter: view file | PgUp/PgDn: 50 | Shift+←/→: sort | Space: direction | s: search | L: all languages | ←: home | Esc: exit"
 }
